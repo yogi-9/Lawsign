@@ -1,0 +1,20 @@
+{
+  "name": "lawsign",
+  "version": "1.0.0",
+  "description": "AI-Powered Document Signing Platform for Legal Professionals",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yogi-9/Lawsign.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "vite": "^6.3.5"
+  }
+}

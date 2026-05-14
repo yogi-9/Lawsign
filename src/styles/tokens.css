@@ -1,0 +1,221 @@
+/* ============================================================
+   LAWSIGN DESIGN SYSTEM — TOKENS
+   The foundation of every visual decision.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+:root {
+  /* ── Color System ── */
+  
+  /* Background: near-black with cool blue undertone — deep space, not a closed room */
+  --bg-primary: #0a0b10;
+  --bg-secondary: #12131a;
+  --bg-tertiary: #1a1b24;
+  --bg-card: #14151e;
+  --bg-card-hover: #1a1b26;
+  --bg-elevated: #1e1f2a;
+  
+  /* Light mode backgrounds */
+  --bg-light-primary: #f8f9fc;
+  --bg-light-secondary: #ffffff;
+  --bg-light-tertiary: #f0f1f5;
+  --bg-light-card: #ffffff;
+  --bg-light-elevated: #ffffff;
+
+  /* Primary Accent: Electric Indigo — intelligent, trustworthy, slightly futuristic */
+  --accent-indigo: #6366f1;
+  --accent-indigo-hover: #7577f5;
+  --accent-indigo-active: #5558e8;
+  --accent-indigo-glow: rgba(99, 102, 241, 0.25);
+  --accent-indigo-subtle: rgba(99, 102, 241, 0.08);
+  --accent-indigo-tint: rgba(99, 102, 241, 0.03);
+  --accent-indigo-border: rgba(99, 102, 241, 0.3);
+
+  /* Secondary Accent: Liquid Cyan — AI processing moments only, never static */
+  --accent-cyan: #22d3ee;
+  --accent-cyan-glow: rgba(34, 211, 238, 0.3);
+  --accent-cyan-subtle: rgba(34, 211, 238, 0.1);
+
+  /* Success: Muted green — clinical confirmation, not celebration */
+  --color-success: #34d399;
+  --color-success-subtle: rgba(52, 211, 153, 0.1);
+  --color-success-border: rgba(52, 211, 153, 0.3);
+
+  /* Error: Controlled red-pink — clear without alarming */
+  --color-error: #f472b6;
+  --color-error-subtle: rgba(244, 114, 182, 0.1);
+  --color-error-border: rgba(244, 114, 182, 0.3);
+
+  /* Warning: Amber */
+  --color-warning: #fbbf24;
+  --color-warning-subtle: rgba(251, 191, 36, 0.1);
+
+  /* Text Colors */
+  --text-primary: #f1f1f4;
+  --text-secondary: #8b8d9e;
+  --text-tertiary: #5c5e72;
+  --text-inverse: #0a0b10;
+  --text-accent: var(--accent-indigo);
+
+  /* Light mode text */
+  --text-light-primary: #0f1019;
+  --text-light-secondary: #5c5e72;
+  --text-light-tertiary: #8b8d9e;
+
+  /* Borders */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.15);
+  --border-light-subtle: rgba(0, 0, 0, 0.06);
+  --border-light-default: rgba(0, 0, 0, 0.1);
+
+  /* Dot Grid */
+  --dot-color: rgba(255, 255, 255, 0.04);
+  --dot-light-color: rgba(0, 0, 0, 0.04);
+  
+  /* Glass */
+  --glass-bg: rgba(10, 11, 16, 0.8);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-blur: 20px;
+
+  /* ── Typography ── */
+  --font-display: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-serif: 'EB Garamond', Georgia, 'Times New Roman', serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Font Sizes — Fluid scale */
+  --text-xs: 0.6875rem;    /* 11px */
+  --text-sm: 0.8125rem;    /* 13px */
+  --text-base: 0.9375rem;  /* 15px */
+  --text-md: 1rem;         /* 16px */
+  --text-lg: 1.125rem;     /* 18px */
+  --text-xl: 1.25rem;      /* 20px */
+  --text-2xl: 1.5rem;      /* 24px */
+  --text-3xl: 2rem;        /* 32px */
+  --text-4xl: 2.5rem;      /* 40px */
+  --text-5xl: 3.25rem;     /* 52px */
+  --text-6xl: 4rem;        /* 64px */
+  --text-hero: clamp(2.5rem, 5vw, 4.5rem);
+
+  /* Font Weights */
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  --weight-extrabold: 800;
+
+  /* Line Heights */
+  --leading-tight: 1.1;
+  --leading-snug: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.65;
+
+  /* Letter Spacing */
+  --tracking-tight: -0.02em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.05em;
+  --tracking-wider: 0.1em;
+
+  /* ── Spacing ── */
+  --space-1: 0.25rem;   /* 4px */
+  --space-2: 0.5rem;    /* 8px */
+  --space-3: 0.75rem;   /* 12px */
+  --space-4: 1rem;      /* 16px */
+  --space-5: 1.25rem;   /* 20px */
+  --space-6: 1.5rem;    /* 24px */
+  --space-8: 2rem;      /* 32px */
+  --space-10: 2.5rem;   /* 40px */
+  --space-12: 3rem;     /* 48px */
+  --space-16: 4rem;     /* 64px */
+  --space-20: 5rem;     /* 80px */
+  --space-24: 6rem;     /* 96px */
+  --space-32: 8rem;     /* 128px */
+
+  /* ── Border Radius ── */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
+  --radius-full: 9999px;
+
+  /* ── Shadows ── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.5);
+  --shadow-glow: 0 0 20px var(--accent-indigo-glow);
+  --shadow-glow-strong: 0 0 30px var(--accent-indigo-glow), 0 0 60px rgba(99, 102, 241, 0.1);
+
+  /* ── Transitions ── */
+  --ease-default: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-out: cubic-bezier(0, 0, 0.25, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 200ms;
+  --duration-medium: 300ms;
+  --duration-slow: 400ms;
+  --duration-slower: 600ms;
+  --duration-slowest: 800ms;
+
+  /* ── Z-Index Scale ── */
+  --z-base: 0;
+  --z-raised: 10;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-overlay: 300;
+  --z-modal: 400;
+  --z-toast: 500;
+  --z-tooltip: 600;
+
+  /* ── Layout ── */
+  --sidebar-width: 200px;
+  --navbar-height: 64px;
+  --max-width: 1280px;
+  --max-width-wide: 1440px;
+}
+
+/* ============================================================
+   THEMED VARIABLES — Apply based on [data-theme]
+   Dark mode is the DEFAULT per the design brief
+   ============================================================ */
+
+[data-theme="dark"],
+:root {
+  --bg: var(--bg-primary);
+  --bg-2: var(--bg-secondary);
+  --bg-3: var(--bg-tertiary);
+  --bg-card-current: var(--bg-card);
+  --bg-card-current-hover: var(--bg-card-hover);
+  --bg-elevated-current: var(--bg-elevated);
+  --text-1: var(--text-primary);
+  --text-2: var(--text-secondary);
+  --text-3: var(--text-tertiary);
+  --border-1: var(--border-subtle);
+  --border-2: var(--border-default);
+  --border-3: var(--border-strong);
+  --dot: var(--dot-color);
+  --glass: var(--glass-bg);
+}
+
+[data-theme="light"] {
+  --bg: var(--bg-light-primary);
+  --bg-2: var(--bg-light-secondary);
+  --bg-3: var(--bg-light-tertiary);
+  --bg-card-current: var(--bg-light-card);
+  --bg-card-current-hover: #f0f1f5;
+  --bg-elevated-current: var(--bg-light-elevated);
+  --text-1: var(--text-light-primary);
+  --text-2: var(--text-light-secondary);
+  --text-3: var(--text-light-tertiary);
+  --border-1: var(--border-light-subtle);
+  --border-2: var(--border-light-default);
+  --border-3: rgba(0, 0, 0, 0.15);
+  --dot: var(--dot-light-color);
+  --glass: rgba(248, 249, 252, 0.85);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.15);
+}
