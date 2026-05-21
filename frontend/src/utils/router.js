@@ -37,7 +37,10 @@ export class Router {
         app.classList.remove('page-container');
         void app.offsetWidth; // Force reflow
         app.classList.add('page-container');
-        route(app);
+        // Support async route handlers (e.g. renderEditor)
+        Promise.resolve(route(app)).catch(err => {
+          console.error('[router] Route handler error:', err);
+        });
       }
     } else {
       // Default to landing

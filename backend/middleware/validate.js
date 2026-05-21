@@ -1,0 +1,90 @@
+'use strict';
+
+/**
+ * middleware/validate.js
+ * Request body validation middleware.
+ *
+ * Exports:
+ *   validateRegister   → validates name, email, password for registration
+ *   validateLogin      → validates email, password for login
+ *   validatePlacements → validates placements array for document signing
+ */
+
+const { sendError } = require('../utils/response');
+
+// ── Email regex ───────────────────────────────────────────────────────────────
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// ── Validate registration ─────────────────────────────────────────────────────
+const validateRegister = (req, res, next) => {
+  const { name, email, password } = req.body;
+  const errors = [];
+
+  if (!name || name.trim().length < 2) {
+    errors.push('Name must be at least 2 characters long.');
+  }
+
+  if (!email || !EMAIL_REGEX.test(email)) {
+    errors.push('Please provide a valid email address.');
+  }
+
+  if (!password || password.length < 8) {
+    errors.push('Password must be at least 8 characters long.');
+  }
+
+  if (errors.length > 0) {
+    return sendError(res, 400, errors.join(' '));
+  }
+
+  next();
+};
+
+// ── Validate login ────────────────────────────────────────────────────────────
+const validateLogin = (req, res, next) => {
+  const { email, password } = req.body;
+  const errors = [];
+
+  if (!email || !EMAIL_REGEX.test(email)) {
+    errors.push('Please provide a valid email address.');
+  }
+
+  if (!password) {
+    errors.push('Password is required.');
+  }
+
+  if (errors.length > 0) {
+    return sendError(res, 400, errors.join(' '));
+  }
+
+  next();
+};
+
+// ── Validate placements ──────────────────────────────────────────────────────
+const validatePlacements = (req, res, next) => {
+  const { placements } = req.body;
+
+  if (!placements || !Array.isArray(placements)) {
+    return sendError(res, 400, 'Placements must be an array.');
+  }
+
+  if (placements.length === 0) {
+    return sendError(res, 400, 'At least one placement is required.');
+  }
+
+  for (let i = 0; i < placements.length; i++) {
+    const p = placements[i];
+    if (typeof p.page !== 'number' || p.page < 1) {
+      return sendError(res, 400, `Placement ${i + 1}: page must be a positive number.`);
+    }
+    if (typeof p.x !== 'number' || typeof p.y !== 'number') {
+      return sendError(res, 400, `Placement ${i + 1}: x and y coordinates are required.`);
+    }
+    if (typeof p.width !== 'number' || typeof p.height !== 'number') {
+      return sendError(res, 400, `Placement ${i + 1}: width and height are required.`);
+    }
+  }
+
+  next();
+};
+
+module.exports = { validateRegister, validateLogin, validatePlacements };

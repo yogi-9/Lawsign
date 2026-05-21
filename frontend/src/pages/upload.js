@@ -1,4 +1,6 @@
 import { createNavbar } from '../components/navbar.js';
+import { documentAPI, signatureAPI, authAPI } from '../utils/api.js';
+import { store } from '../utils/store.js';
 
 const checkSvg = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg>`;
 
@@ -10,7 +12,7 @@ const STEPS = [
   'Detecting signature zones',
   'Processing signature image',
   'Removing background',
-  'Ready'
+  'Ready',
 ];
 
 export function renderUpload(app) {
@@ -53,6 +55,8 @@ export function renderUpload(app) {
         </div>
       </div>
 
+      <div id="upload-error" style="display:none;color:#ef4444;text-align:center;margin-top:12px;font-size:var(--text-sm);"></div>
+
       <div class="upload-proceed">
         <button class="btn btn-primary btn-lg disabled" id="btn-proceed" disabled>Proceed to Editor</button>
       </div>
@@ -72,16 +76,20 @@ export function renderUpload(app) {
 
   app.appendChild(main);
 
-  // Wire up zones
+  // ── Wire upload zones ────────────────────────────────────────────────────────
   ['doc', 'sig'].forEach(type => {
-    const zone = main.querySelector(`#zone-${type}`);
+    const zone  = main.querySelector(`#zone-${type}`);
     const input = main.querySelector(`#input-${type}`);
 
     zone.addEventListener('click', () => input.click());
-    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+    zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('dragover'); });
     zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
-    zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('dragover'); handleFile(e.dataTransfer.files[0], type); });
-    input.addEventListener('change', e => { if(e.target.files[0]) handleFile(e.target.files[0], type); });
+    zone.addEventListener('drop', e => {
+      e.preventDefault();
+      zone.classList.remove('dragover');
+      handleFile(e.dataTransfer.files[0], type);
+    });
+    input.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0], type); });
   });
 
   function handleFile(file, type) {
@@ -94,7 +102,7 @@ export function renderUpload(app) {
     let preview = '';
     if (isImage) {
       const url = URL.createObjectURL(file);
-      preview = `<img src="${url}" alt="Preview">`;
+      preview = `<img src="${url}" alt="Preview" style="max-height:80px;border-radius:4px;">`;
     } else {
       preview = `<div style="width:80px;height:100px;background:white;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--accent-indigo)" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
@@ -108,7 +116,7 @@ export function renderUpload(app) {
       <button class="upload-file-remove" data-type="${type}">× Remove</button>
     </div>`;
 
-    zone.querySelector('.upload-file-remove').addEventListener('click', (e) => {
+    zone.querySelector('.upload-file-remove').addEventListener('click', e => {
       e.stopPropagation();
       state[type] = null;
       zone.classList.remove('has-file');
@@ -123,11 +131,18 @@ export function renderUpload(app) {
     const isDoc = type === 'doc';
     zone.innerHTML = `
       <div class="upload-zone-icon">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">${isDoc ? '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>' : '<path d="M12 19c-4 0-7-1-9-3"/><path d="M3 16c2-3 4-8 7-8s3 3 5 3 3-2 5-2"/>'}</svg>
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">${isDoc
+          ? '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>'
+          : '<path d="M12 19c-4 0-7-1-9-3"/><path d="M3 16c2-3 4-8 7-8s3 3 5 3 3-2 5-2"/>'}</svg>
       </div>
       <div class="upload-zone-primary">${isDoc ? 'Drop your document here' : 'Drop your signature photo here'}</div>
       <div class="upload-zone-secondary">${isDoc ? 'PDF, DOCX, JPG, PNG — up to 50MB' : 'A clear photo of your signature on white paper'}</div>
+      <input type="file" id="input-${type}" accept="${isDoc ? '.pdf,.docx,.doc,.jpg,.jpeg,.png' : '.jpg,.jpeg,.png,.webp'}" style="display:none">
     `;
+    // Re-wire the new input
+    const newInput = zone.querySelector(`#input-${type}`);
+    zone.addEventListener('click', () => newInput.click());
+    newInput.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0], type); });
   }
 
   function updateProceed() {
@@ -141,18 +156,24 @@ export function renderUpload(app) {
     }
   }
 
-  main.querySelector('#btn-proceed').addEventListener('click', () => {
+  function showError(msg) {
+    const el = main.querySelector('#upload-error');
+    el.textContent = msg;
+    el.style.display = 'block';
+    setTimeout(() => { el.style.display = 'none'; }, 6000);
+  }
+
+  // ── Proceed button — real API upload ──────────────────────────────────────────
+  main.querySelector('#btn-proceed').addEventListener('click', async () => {
     if (!state.doc || !state.sig) return;
-    runProcessing();
-  });
 
-  function runProcessing() {
     const overlay = main.querySelector('#processing-overlay');
+    const steps   = overlay.querySelectorAll('.processing-step');
     overlay.classList.add('active');
-    const steps = overlay.querySelectorAll('.processing-step');
-    let i = 0;
 
-    function nextStep() {
+    // Animate first 6 fake steps while real upload happens in background
+    let i = 0;
+    function animateStep() {
       if (i > 0) {
         steps[i-1].querySelector('.step-status').classList.remove('active');
         steps[i-1].querySelector('.step-status').classList.add('done');
@@ -160,17 +181,61 @@ export function renderUpload(app) {
         steps[i-1].querySelector('.step-text').classList.remove('active');
         steps[i-1].querySelector('.step-text').classList.add('done');
       }
-      if (i < steps.length) {
+      if (i < steps.length - 2) { // leave last 2 for real API response
         steps[i].querySelector('.step-status').classList.add('active');
         steps[i].querySelector('.step-text').classList.add('active');
         i++;
-        setTimeout(nextStep, 600 + Math.random() * 400);
-      } else {
-        setTimeout(() => {
-          window.location.hash = '#/editor';
-        }, 800);
+        setTimeout(animateStep, 500 + Math.random() * 300);
       }
     }
-    setTimeout(nextStep, 400);
-  }
+    animateStep();
+
+    try {
+      // ── Ensure guest session exists ─────────────────────────────────────────
+      try { await authAPI.verify(); }
+      catch { await authAPI.guest(); }
+
+      // ── Upload document to backend ──────────────────────────────────────────
+      const docResult = await documentAPI.upload(state.doc);
+
+      // ── Upload signature to backend ─────────────────────────────────────────
+      const sigResult = await signatureAPI.upload(state.sig);
+
+      // ── Write to shared store ───────────────────────────────────────────────
+      store.clear();
+      store.documentId       = docResult.documentId;
+      store.documentName     = docResult.originalName;
+      store.mimeType         = docResult.mimeType;
+      store.pageCount        = docResult.pageCount || 1;
+      store.detectedFields   = docResult.detectedFields || [];
+      store.signatureId      = sigResult.signatureId;
+      store.signatureImageUrl = sigResult.imageUrl; // relative path from backend
+
+      // ── Finish last steps animation ─────────────────────────────────────────
+      while (i < steps.length) {
+        steps[i].querySelector('.step-status').classList.add('active');
+        steps[i].querySelector('.step-text').classList.add('active');
+        await new Promise(r => setTimeout(r, 400));
+        steps[i].querySelector('.step-status').classList.remove('active');
+        steps[i].querySelector('.step-status').classList.add('done');
+        steps[i].querySelector('.step-status').innerHTML = checkSvg;
+        steps[i].querySelector('.step-text').classList.remove('active');
+        steps[i].querySelector('.step-text').classList.add('done');
+        i++;
+      }
+
+      await new Promise(r => setTimeout(r, 500));
+      window.location.hash = '#/editor';
+
+    } catch (err) {
+      overlay.classList.remove('active');
+      // Reset steps
+      steps.forEach(s => {
+        s.querySelector('.step-status').className = 'step-status';
+        s.querySelector('.step-status').innerHTML = '';
+        s.querySelector('.step-text').classList.remove('active','done');
+      });
+      showError(`Upload failed: ${err.message}. Make sure the backend is running on port 5000.`);
+    }
+  });
 }
