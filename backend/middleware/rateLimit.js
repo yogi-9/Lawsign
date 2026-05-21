@@ -40,10 +40,11 @@ const authLimiter = rateLimit({
 // ── Upload limiter ────────────────────────────────────────────────────────────
 const uploadLimiter = rateLimit({
   windowMs : 60 * 60 * 1000,  // 1 hour
-  max      : 10,
+  max      : 20,
+  keyGenerator: (req) => req.ip, // strictly by IP, ignoring session
   message  : {
     success: false,
-    error  : 'Upload limit reached. Please try again in an hour.',
+    error  : 'Upload limit reached. Maximum 20 uploads per hour per IP. Please try again later.',
   },
   standardHeaders: true,
   legacyHeaders  : false,

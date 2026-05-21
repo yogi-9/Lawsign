@@ -10,6 +10,7 @@
  */
 
 const mongoose = require('mongoose');
+const crypto = require('crypto');
 const { AUDIT_ACTIONS } = require('../config/constants');
 
 const auditLogSchema = new mongoose.Schema(
@@ -58,6 +59,12 @@ const auditLogSchema = new mongoose.Schema(
       type   : mongoose.Schema.Types.Mixed,
       default: {},
     },
+
+    // Tamper-evident content hash
+    contentHash: {
+      type: String,
+      default: null,
+    }
   },
   {
     // Only createdAt — audit logs are never updated
@@ -70,6 +77,24 @@ const auditLogSchema = new mongoose.Schema(
 auditLogSchema.index({ createdAt: -1 });
 // Per-user audit trail
 auditLogSchema.index({ userId: 1, createdAt: -1 });
+
+// ── Tamper-evident Hashing ────────────────────────────────────────────────────
+auditLogSchema.pre('save', function (next) {
+  if (this.isNew) {
+    const payload = JSON.stringify({
+      userId: this.userId ? this.userId.toString() : null,
+      guestSessionId: this.guestSessionId,
+      documentId: this.documentId ? this.documentId.toString() : null,
+      action: this.action,
+      ipAddress: this.ipAddress,
+      userAgent: this.userAgent,
+      metadata: this.metadata
+    });
+    const secret = process.env.AUDIT_SECRET || 'lawsign-audit-secret-123';
+    this.contentHash = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+  }
+  next();
+});
 
 // ── Prevent deletion at the model level ───────────────────────────────────────
 // Mongoose middleware that throws if anyone tries to delete audit logs

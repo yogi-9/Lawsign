@@ -1,12 +1,6 @@
-/* DASHBOARD PAGE */
-const DOCS = [
-  { name:'rental_agreement_final.pdf', date:'14 May 2026', sigs:5, status:'signed', type:'PDF' },
-  { name:'partnership_deed_v2.pdf', date:'12 May 2026', sigs:8, status:'signed', type:'PDF' },
-  { name:'sale_deed_mumbai.docx', date:'10 May 2026', sigs:3, status:'signed', type:'DOCX' },
-  { name:'affidavit_court_filing.pdf', date:'8 May 2026', sigs:2, status:'signed', type:'PDF' },
-  { name:'nda_client_xyz.pdf', date:'5 May 2026', sigs:4, status:'in-progress', type:'PDF' },
-];
+import { documentAPI, outputAPI } from '../utils/api.js';
 
+/* DASHBOARD PAGE */
 const navIcon = (name) => {
   const icons = {
     documents: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',
@@ -19,10 +13,18 @@ const navIcon = (name) => {
   return icons[name] || '';
 };
 
-export function renderDashboard(app) {
+export async function renderDashboard(app) {
   const statusBadge = (s) => s === 'signed'
     ? '<span class="badge badge-success">Signed</span>'
     : '<span class="badge badge-warning">In Progress</span>';
+
+  const skeletonHtml = Array(3).fill(0).map(() => `<tr class="dash-row" style="pointer-events:none;">
+    <td><div class="shimmer-bar" style="width:70%;height:16px;border-radius:4px;display:inline-block"></div></td>
+    <td><div class="shimmer-bar" style="width:50%;height:16px;border-radius:4px;display:inline-block"></div></td>
+    <td><div class="shimmer-bar" style="width:30%;height:16px;border-radius:4px;display:inline-block"></div></td>
+    <td><div class="shimmer-bar" style="width:60%;height:16px;border-radius:4px;display:inline-block"></div></td>
+    <td></td>
+  </tr>`).join('');
 
   app.innerHTML = `<div class="dash-layout">
     <aside class="dash-sidebar">
@@ -46,9 +48,9 @@ export function renderDashboard(app) {
     <main class="dash-main">
       <div class="dash-header"><h1>Documents</h1></div>
       <div class="dash-metrics">
-        <div class="dash-metric-card"><div class="dash-metric-value">24</div><div class="dash-metric-label">Total Documents</div></div>
-        <div class="dash-metric-card"><div class="dash-metric-value">87</div><div class="dash-metric-label">Signatures Placed</div></div>
-        <div class="dash-metric-card"><div class="dash-metric-value">12 MB</div><div class="dash-metric-label">Storage Used</div></div>
+        <div class="dash-metric-card"><div class="dash-metric-value" id="metric-docs">-</div><div class="dash-metric-label">Total Documents</div></div>
+        <div class="dash-metric-card"><div class="dash-metric-value" id="metric-sigs">-</div><div class="dash-metric-label">Signatures Placed</div></div>
+        <div class="dash-metric-card"><div class="dash-metric-value">-</div><div class="dash-metric-label">Storage Used</div></div>
       </div>
       <div class="dash-filters">
         <div class="dash-search"><input class="input-field" placeholder="Search documents..." style="width:100%;"></div>
@@ -61,40 +63,80 @@ export function renderDashboard(app) {
         <thead>
           <tr><th>Document</th><th>Date</th><th>Signatures</th><th>Status</th><th></th></tr>
         </thead>
-        <tbody>
-          ${DOCS.map((d,i) => `<tr class="dash-row" data-idx="${i}">
-            <td><span class="doc-link">${d.name}</span></td>
-            <td>${d.date}</td>
-            <td class="doc-sigs">${d.sigs}</td>
-            <td>${statusBadge(d.status)}</td>
-            <td style="color:var(--text-3);cursor:pointer;">⋯</td>
-          </tr>
-          <tr class="dash-expand-row"><td colspan="5"><div class="dash-expand" id="expand-${i}">
-            <div class="dash-expand-thumb"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent-indigo)" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
-            <div class="dash-expand-details">
-              <div><strong>Signed by:</strong> J. Sharma</div>
-              <div><strong>Date:</strong> ${d.date} at 10:30 AM IST</div>
-              <div><strong>IP:</strong> 103.xx.xx.xx</div>
-              <div><strong>Audit:</strong> ${d.sigs} signatures, all verified</div>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:var(--space-2);">
-              <button class="btn btn-primary btn-sm">Download</button>
-              <button class="btn btn-ghost btn-sm">Rename</button>
-            </div>
-          </div></td></tr>`).join('')}
+        <tbody id="dash-tbody">
+          ${skeletonHtml}
         </tbody>
       </table>
     </main>
   </div>`;
 
-  // Expand rows
-  app.querySelectorAll('.dash-row').forEach(row => {
-    row.addEventListener('click', () => {
-      const idx = row.dataset.idx;
-      const expand = app.querySelector(`#expand-${idx}`);
-      expand.classList.toggle('open');
-    });
-  });
+  const tbody = app.querySelector('#dash-tbody');
+  
+  try {
+    const docs = await documentAPI.list();
+    
+    app.querySelector('#metric-docs').textContent = docs.length;
+    app.querySelector('#metric-sigs').textContent = docs.reduce((acc, d) => acc + (d.placements?.length || 0), 0);
+    
+    if (docs.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-3);">
+        <p style="margin-bottom: 12px;">No documents yet.</p>
+        <a href="#/upload" class="btn btn-primary btn-sm">Upload your first document</a>
+      </td></tr>`;
+    } else {
+      tbody.innerHTML = docs.map((d, i) => {
+        const dateStr = new Date(d.createdAt).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' });
+        const sigs = d.placements?.length || 0;
+        return `<tr class="dash-row" data-idx="${i}">
+          <td><span class="doc-link">${d.originalName}</span></td>
+          <td>${dateStr}</td>
+          <td class="doc-sigs">${sigs}</td>
+          <td>${statusBadge(d.processingStatus)}</td>
+          <td style="color:var(--text-3);cursor:pointer;">⋯</td>
+        </tr>
+        <tr class="dash-expand-row"><td colspan="5"><div class="dash-expand" id="expand-${i}">
+          <div class="dash-expand-thumb"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent-indigo)" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+          <div class="dash-expand-details">
+            <div><strong>Signed by:</strong> You</div>
+            <div><strong>Date:</strong> ${dateStr}</div>
+            <div><strong>Audit:</strong> ${sigs} signatures</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:var(--space-2);">
+            <button class="btn btn-primary btn-sm btn-download" data-id="${d._id}">Download</button>
+            <button class="btn btn-ghost btn-sm">Rename</button>
+          </div>
+        </div></td></tr>`;
+      }).join('');
+
+      app.querySelectorAll('.dash-row').forEach(row => {
+        row.addEventListener('click', () => {
+          const idx = row.dataset.idx;
+          const expand = app.querySelector(`#expand-${idx}`);
+          expand.classList.toggle('open');
+        });
+      });
+      
+      app.querySelectorAll('.btn-download').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const url = outputAPI.downloadUrl(btn.dataset.id);
+          window.open(url, '_blank');
+        });
+      });
+    }
+
+  } catch (err) {
+    if (err.message.includes('401') || err.message.includes('Authentication')) {
+      window.location.hash = '#/login';
+      return;
+    }
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:40px;color:#ef4444;">
+      <p>Failed to load documents: ${err.message}</p>
+      <button class="btn btn-primary btn-sm" style="margin-top:12px;" id="dash-retry">Retry</button>
+    </td></tr>`;
+    const retryBtn = app.querySelector('#dash-retry');
+    if (retryBtn) retryBtn.addEventListener('click', () => renderDashboard(app));
+  }
 
   // Filter chips
   app.querySelectorAll('.dash-filters .chip').forEach(chip => {

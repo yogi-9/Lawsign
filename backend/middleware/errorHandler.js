@@ -6,7 +6,8 @@
  *
  * Every error thrown anywhere in the application (or passed to next(error))
  * ends up here. Maps known error types to clean HTTP responses.
- * Never exposes stack traces in production.
+ * Uses the AppError `isOperational` flag to determine response format.
+ * Never exposes stack traces or programmer errors in production.
  */
 
 const errorHandler = (err, req, res, next) => { // eslint-disable-line no-unused-vars
@@ -18,12 +19,14 @@ const errorHandler = (err, req, res, next) => { // eslint-disable-line no-unused
 
   let statusCode = err.statusCode || 500;
   let message    = err.message    || 'Internal Server Error';
+  let isOperational = err.isOperational || false;
 
   // ── Mongoose: invalid ObjectId format ─────────────────────────────────────
   // Example: GET /documents/not-a-valid-id
   if (err.name === 'CastError') {
     statusCode = 400;
     message    = `Invalid ID format: "${err.value}" is not a valid document ID.`;
+    isOperational = true;
   }
 
   // ── Mongoose: duplicate key (unique constraint violated) ───────────────────
@@ -32,6 +35,7 @@ const errorHandler = (err, req, res, next) => { // eslint-disable-line no-unused
     statusCode = 400;
     const field = Object.keys(err.keyValue || {})[0] || 'field';
     message = `That ${field} is already registered. Please use a different one.`;
+    isOperational = true;
   }
 
   // ── Mongoose: schema validation errors ────────────────────────────────────
@@ -40,23 +44,27 @@ const errorHandler = (err, req, res, next) => { // eslint-disable-line no-unused
     statusCode = 400;
     const fieldMessages = Object.values(err.errors).map((e) => e.message);
     message = fieldMessages.join(' | ');
+    isOperational = true;
   }
 
   // ── JWT: tampered or malformed token ──────────────────────────────────────
   else if (err.name === 'JsonWebTokenError') {
     statusCode = 401;
     message    = 'Invalid session token. Please log in again.';
+    isOperational = true;
   }
 
   // ── JWT: expired token ────────────────────────────────────────────────────
   else if (err.name === 'TokenExpiredError') {
     statusCode = 401;
     message    = 'Your session has expired. Please log in again.';
+    isOperational = true;
   }
 
   // ── Multer: file type or size violations ──────────────────────────────────
   else if (err.name === 'MulterError') {
     statusCode = 400;
+    isOperational = true;
     if (err.code === 'LIMIT_FILE_SIZE') {
       message = 'File is too large. Please check the size limit for this upload type.';
     } else if (err.code === 'LIMIT_UNEXPECTED_FILE') {
@@ -67,15 +75,16 @@ const errorHandler = (err, req, res, next) => { // eslint-disable-line no-unused
   }
 
   // ── Send final response ───────────────────────────────────────────────────
-  // In production: never leak internal error details
-  // In development: include the actual message for easy debugging
+  // In production: never leak internal error details for non-operational errors
+  // In development: include the actual message and stack trace for debugging
+  const isProd = process.env.NODE_ENV === 'production';
+
   res.status(statusCode).json({
     success: false,
-    error  : statusCode === 500 && process.env.NODE_ENV === 'production'
+    error: (isProd && !isOperational)
       ? 'Something went wrong on our end. Please try again later.'
       : message,
-    // Include stack trace only in development
-    ...(process.env.NODE_ENV !== 'production' && statusCode === 500 && { stack: err.stack }),
+    ...(!isProd && !isOperational && { stack: err.stack }), // Only show stack trace for bugs in dev
   });
 };
 

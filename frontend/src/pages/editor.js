@@ -21,7 +21,7 @@ export async function renderEditor(app) {
   const fields = store.detectedFields, sigId = store.signatureId, docId = store.documentId;
   const docName = store.documentName || 'document.pdf', pages = store.pageCount || 1;
   const isPDF = (store.mimeType || 'application/pdf') === 'application/pdf';
-  sigUrl = store.signatureImageUrl ? `${BASE}${store.signatureImageUrl.replace('/api/v1','')}` : null;
+  sigUrl = store.signatureImageUrl || null;
 
   app.innerHTML = buildShell(docName, fields, pages, docId, isPDF);
   await loadDocPages(app, docId, pages, isPDF);
@@ -263,10 +263,14 @@ function updateGenBtn() {
 function buildPlacements(sigId) {
   return placedSigs.map(s => ({
     page: s.page,
-    x: s.leftPct / 100 * PW,
-    y: PH - (s.topPct / 100 * PH) - (s.heightPct / 100 * PH),
-    width: s.widthPct / 100 * PW,
-    height: s.heightPct / 100 * PH,
+    x: (s.leftPct / 100) * PW,
+    y: (s.topPct / 100) * PH,
+    width: (s.widthPct / 100) * PW,
+    height: (s.heightPct / 100) * PH,
+    leftPct: s.leftPct,
+    topPct: s.topPct,
+    widthPct: s.widthPct,
+    heightPct: s.heightPct,
     rotation: 0,
     signatureId: sigId,
   }));
@@ -279,6 +283,30 @@ function wireAll(app, { fields, sigId, docId, docName, pages }) {
   const cv = app.querySelector('#editor-canvas');
   app.querySelector('#btn-zoom-in')?.addEventListener('click', () => { zoom = Math.min(zoom+10,200); cv.style.zoom=zoom/100; app.querySelector('#zoom-label').textContent=zoom+'%'; });
   app.querySelector('#btn-zoom-out')?.addEventListener('click', () => { zoom = Math.max(zoom-10,50); cv.style.zoom=zoom/100; app.querySelector('#zoom-label').textContent=zoom+'%'; });
+
+  // Checklist click to scroll and highlight
+  const checklist = app.querySelector('#checklist');
+  if (checklist) {
+    checklist.addEventListener('click', (e) => {
+      const item = e.target.closest('[data-idx]');
+      if (!item) return;
+
+      const idx = parseInt(item.dataset.idx);
+      const field = fields[idx];
+      if (!field) return;
+
+      // Find the sig-zone for this field and scroll to it
+      const zone = app.querySelector(`.sig-zone[data-gi="${idx}"]`);
+      if (zone) {
+        zone.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Flash the zone to draw attention
+        zone.style.background = 'rgba(99,102,241,0.2)';
+        setTimeout(() => {
+          zone.style.background = '';
+        }, 1000);
+      }
+    });
+  }
 
   // Toggles
   app.querySelectorAll('.toggle').forEach(t => t.addEventListener('click', () => t.classList.toggle('active')));
@@ -365,7 +393,7 @@ async function showModal(app, {docId, sigId, docName, fields}) {
     const result = await outputAPI.generate(docId, sigId, placements);
     clearInterval(iv);
     while(si<STEPS.length){steps[si].querySelector('.dot').classList.add('done');si++;} ring.style.strokeDashoffset=0; pp.textContent='100%';
-    store.outputDocumentId = docId;
+    store.setOutputDocumentId(docId);
     setTimeout(()=>showDone(mc,{docName,fields,downloadUrl:`http://localhost:5000${result.downloadUrl}`}),600);
   } catch(err) {
     clearInterval(iv);
@@ -387,7 +415,7 @@ function showDone(mc,{docName,fields,downloadUrl}) {
       <div><div class="sum-label">Signatures</div><div class="sum-value">${placedSigs.length}</div></div>
       <div><div class="sum-label">Signed</div><div class="sum-value">${now}</div></div>
     </div>
-    <a href="${downloadUrl}" download="signed-${docName}" class="btn btn-primary btn-full btn-lg" style="margin-top:var(--space-4);text-align:center;text-decoration:none">⬇ Download Signed PDF</a>
+    <a href="${downloadUrl}" download="signed-${docName.replace(/\.[^/.]+$/, '')}.pdf" class="btn btn-primary btn-full btn-lg" style="margin-top:var(--space-4);text-align:center;text-decoration:none">⬇ Download Signed PDF</a>
     <div class="download-links"><a href="#/upload" class="download-link">Sign another →</a><a href="#/dashboard" class="download-link">Dashboard →</a></div>
     <p class="download-info">Available 30 days · Audit trail saved</p></div>`;
 }

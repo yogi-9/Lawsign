@@ -13,6 +13,7 @@ const User           = require('../models/User');
 const { verifyToken } = require('../utils/jwt');
 const { sendError }  = require('../utils/response');
 const { COOKIE_NAME, GUEST_COOKIE } = require('../config/constants');
+const { guestSessions } = require('../controllers/auth.controller');
 
 // ── Core auth logic ────────────────────────────────────────────────────────────
 const _authenticate = async (req) => {
@@ -75,7 +76,14 @@ const optionalAuth = async (req, res, next) => {
     } else {
       // No authenticated user — check for guest session cookie
       const guestId = req.cookies?.[GUEST_COOKIE];
-      if (guestId) req.guestSessionId = guestId;
+      if (guestId) {
+        const session = guestSessions.get(guestId);
+        if (session && session.expiresAt > Date.now()) {
+          req.guestSessionId = guestId;
+        }
+        // If session not found or expired, guestSessionId stays undefined
+        // Next controller will handle unauthorized access
+      }
     }
 
     next(); // always continues — no 401

@@ -86,5 +86,45 @@ const validatePlacements = (req, res, next) => {
 
   next();
 };
+// ── Regex for ObjectId ────────────────────────────────────────────────────────
+const OBJECTID_REGEX = /^[0-9a-fA-F]{24}$/;
 
-module.exports = { validateRegister, validateLogin, validatePlacements };
+// ── Validate Generate ────────────────────────────────────────────────────────
+const validateGenerate = (req, res, next) => {
+  const { documentId, signatureId } = req.body;
+  if (!documentId || !OBJECTID_REGEX.test(documentId)) {
+    return sendError(res, 400, 'Valid documentId is required.');
+  }
+  if (!signatureId || !OBJECTID_REGEX.test(signatureId)) {
+    return sendError(res, 400, 'Valid signatureId is required.');
+  }
+  next();
+};
+
+// ── Validate Upload File ─────────────────────────────────────────────────────
+const validateUploadFile = (req, res, next) => {
+  if (!req.file) {
+    return sendError(res, 400, 'No file uploaded. Please attach a file.');
+  }
+  next();
+};
+
+// ── Validate ObjectId (Factory) ──────────────────────────────────────────────
+const validateObjectId = (field) => {
+  return (req, res, next) => {
+    const id = req.params[field];
+    if (!id || !OBJECTID_REGEX.test(id)) {
+      return sendError(res, 400, `Invalid format for parameter: ${field}`);
+    }
+    next();
+  };
+};
+
+module.exports = { 
+  validateRegister, 
+  validateLogin, 
+  validatePlacements,
+  validateGenerate,
+  validateUploadFile,
+  validateObjectId
+};

@@ -59,7 +59,7 @@ const generatePDF = asyncHandler(async (req, res) => {
   if (!fileExists(sig.processedPath)) return sendError(res, 404, 'Signature image not found on server.');
 
   // Generate PDF
-  const result = await generateSignedPDF(doc.storagePath, sig.processedPath, placements);
+  const result = await generateSignedPDF(doc.storagePath, sig.processedPath, placements, doc.mimeType);
 
   if (!result.success) {
     return sendError(res, 500, result.error);
@@ -87,15 +87,21 @@ const generatePDF = asyncHandler(async (req, res) => {
   });
 
   // Real-time push — download button appears immediately in browser
-  if (req.user) {
-    try {
+  try {
+    if (req.user) {
       getIO().to(req.user._id.toString()).emit('pdf:ready', {
         documentId  : doc._id,
         downloadUrl : `/api/v1/output/download/${doc._id}`,
         status      : DOC_STATUS.SIGNED,
       });
-    } catch (_) { /* non-critical */ }
-  }
+    } else if (req.guestSessionId) {
+      getIO().to(`guest:${req.guestSessionId}`).emit('pdf:ready', {
+        documentId  : doc._id,
+        downloadUrl : `/api/v1/output/download/${doc._id}`,
+        status      : DOC_STATUS.SIGNED,
+      });
+    }
+  } catch (_) { /* non-critical */ }
 
   return sendSuccess(res, 200, {
     documentId  : doc._id,
@@ -138,7 +144,8 @@ const downloadPDF = asyncHandler(async (req, res) => {
   });
 
   // Stream the file to client
-  const downloadName = `signed-${doc.originalName.replace(/\s+/g, '_')}`;
+  const baseName = doc.originalName.replace(/\.[^/.]+$/, '').replace(/\s+/g, '_');
+  const downloadName = `signed-${baseName}.pdf`;
   res.setHeader('Content-Disposition', `attachment; filename="${downloadName}"`);
   res.setHeader('Content-Type', 'application/pdf');
   getFileStream(doc.outputPath).pipe(res);

@@ -64,7 +64,9 @@ const extractPDFPage = async (pdfPath, pageNum) => {
 
   // Cache it
   ensureDir(cacheDir);
-  fs.writeFileSync(cachePath, singlePageBytes);
+  const tempPath = cachePath + '.tmp';
+  fs.writeFileSync(tempPath, singlePageBytes);
+  fs.renameSync(tempPath, cachePath);
 
   return {
     buffer: Buffer.from(singlePageBytes),

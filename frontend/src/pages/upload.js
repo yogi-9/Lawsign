@@ -192,8 +192,22 @@ export function renderUpload(app) {
 
     try {
       // ── Ensure guest session exists ─────────────────────────────────────────
-      try { await authAPI.verify(); }
-      catch { await authAPI.guest(); }
+      try {
+        await authAPI.verify();
+        // User is logged in — proceed
+      } catch (err) {
+        if (err.message.includes('401') || err.message.includes('Authentication required') || err.message.includes('Session')) {
+          // User is not logged in — create guest session
+          try {
+            await authAPI.guest();
+          } catch (guestErr) {
+            throw new Error('Could not start session. Please check your connection and try again.');
+          }
+        } else {
+          // Network error or server error — surface it clearly
+          throw new Error('Cannot connect to LawSign server. Make sure the backend is running on port 5000.');
+        }
+      }
 
       // ── Upload document to backend ──────────────────────────────────────────
       const docResult = await documentAPI.upload(state.doc);
@@ -203,13 +217,13 @@ export function renderUpload(app) {
 
       // ── Write to shared store ───────────────────────────────────────────────
       store.clear();
-      store.documentId       = docResult.documentId;
-      store.documentName     = docResult.originalName;
-      store.mimeType         = docResult.mimeType;
-      store.pageCount        = docResult.pageCount || 1;
-      store.detectedFields   = docResult.detectedFields || [];
-      store.signatureId      = sigResult.signatureId;
-      store.signatureImageUrl = sigResult.imageUrl; // relative path from backend
+      store.setDocumentId(docResult.documentId);
+      store.setDocumentName(docResult.originalName);
+      store.setMimeType(docResult.mimeType);
+      store.setPageCount(docResult.pageCount || 1);
+      store.setDetectedFields(docResult.detectedFields || []);
+      store.setSignatureId(sigResult.signatureId);
+      store.setSignatureImageUrl(sigResult.imageUrl);
 
       // ── Finish last steps animation ─────────────────────────────────────────
       while (i < steps.length) {

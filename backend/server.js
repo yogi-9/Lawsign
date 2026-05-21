@@ -49,6 +49,7 @@ const authRoutes      = require('./routes/auth.routes');
 const documentRoutes  = require('./routes/document.routes');
 const signatureRoutes = require('./routes/signature.routes');
 const outputRoutes    = require('./routes/output.routes');
+const auditRoutes     = require('./routes/audit.routes');
 
 // ─────────────────────────────────────────────────────────────────────────────
 async function startServer() {
@@ -62,7 +63,31 @@ async function startServer() {
   const app = express();
 
   // ── 5. Helmet — security HTTP headers ────────────────────────────────────────
-  app.use(helmet());
+  const isProd = process.env.NODE_ENV === 'production';
+  
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "https://cdnjs.cloudflare.com"],
+        imgSrc: ["'self'", "data:", "blob:"],
+        styleSrc: ["'self'", "'unsafe-inline'"], // Allow inline styles for UI components
+        connectSrc: ["'self'", process.env.FRONTEND_URL || "http://localhost:5173", "ws://localhost:5000", "wss://localhost:5000"],
+      },
+    },
+    hsts: isProd ? {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: true
+    } : false, // Never set HSTS in dev
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+    xFrameOptions: { action: 'sameorigin' },
+  }));
+
+  app.use((req, res, next) => {
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    next();
+  });
 
   // ── 6. CORS — allow frontend to talk to this API ─────────────────────────────
   app.use(cors({
@@ -90,6 +115,7 @@ async function startServer() {
   app.use('/api/v1/documents',  documentRoutes);
   app.use('/api/v1/signatures', signatureRoutes);
   app.use('/api/v1/output',     outputRoutes);
+  app.use('/api/v1/audit',      auditRoutes);
 
   // ── 11. Health check ──────────────────────────────────────────────────────────
   app.get('/api/v1/health', (_req, res) => res.json({
@@ -125,37 +151,60 @@ async function startServer() {
   });
 
   // ── 16. Socket.io auth middleware ─────────────────────────────────────────────
-  // Verifies JWT from cookie or handshake.auth.token before accepting connection
   io.use((socket, next) => {
     try {
-      // Try cookie first
       const cookieHeader = socket.handshake.headers?.cookie || '';
-      const fromCookie   = cookieHeader
+
+      // Try to extract JWT token from cookie
+      const tokenCookie = cookieHeader
         .split(';')
         .map(c => c.trim())
-        .find(c => c.startsWith(`${COOKIE_NAME}=`))
-        ?.split('=').slice(1).join('='); // handle = signs in value
+        .find(c => c.startsWith('lawsign_token='));
 
-      const token = socket.handshake.auth?.token || fromCookie;
+      const token = socket.handshake.auth?.token ||
+        (tokenCookie ? tokenCookie.split('=').slice(1).join('=') : null);
 
-      if (!token) return next(new Error('Socket: authentication required.'));
+      if (token) {
+        // Authenticated user — verify JWT and join userId room
+        const decoded = verifyToken(token);
+        socket.userId = decoded.userId;
+        socket.guestSessionId = null;
+        return next();
+      }
 
-      const decoded  = verifyToken(token);
-      socket.userId  = decoded.userId;
-      next();
+      // No JWT — check for guest cookie
+      const guestCookie = cookieHeader
+        .split(';')
+        .map(c => c.trim())
+        .find(c => c.startsWith('lawsign_guest='));
+
+      if (guestCookie) {
+        const guestId = guestCookie.split('=').slice(1).join('=');
+        socket.userId = null;
+        socket.guestSessionId = guestId;
+        return next();
+      }
+
+      // No credentials at all — reject
+      return next(new Error('Socket: authentication required'));
+
     } catch {
-      next(new Error('Socket: invalid or expired token.'));
+      return next(new Error('Socket: invalid or expired token'));
     }
   });
 
   io.on('connection', (socket) => {
-    // Each user gets a private room named after their userId
-    // output.controller emits to this room when PDF is ready
-    socket.join(socket.userId);
-    console.log(`🔌 Socket connected    → user ${socket.userId}`);
+    if (socket.userId) {
+      socket.join(socket.userId);
+      console.log(`Socket connected — user ${socket.userId}`);
+    } else if (socket.guestSessionId) {
+      socket.join(`guest:${socket.guestSessionId}`);
+      console.log(`Socket connected — guest ${socket.guestSessionId}`);
+    }
 
     socket.on('disconnect', (reason) => {
-      console.log(`🔌 Socket disconnected ← user ${socket.userId} (${reason})`);
+      const id = socket.userId || socket.guestSessionId;
+      console.log(`Socket disconnected — ${id} (${reason})`);
     });
   });
 

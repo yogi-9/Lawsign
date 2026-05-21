@@ -28,6 +28,7 @@ const {
   SIG_PROCESSING,
 } = require('../config/constants');
 const { v4: uuidv4 }  = require('uuid');
+const { generateSignatureToken } = require('../utils/signatureToken');
 
 // ── Upload & process signature ─────────────────────────────────────────────────
 const uploadSignature = asyncHandler(async (req, res) => {
@@ -40,49 +41,35 @@ const uploadSignature = asyncHandler(async (req, res) => {
 
   try {
     // ── Sharp processing pipeline ─────────────────────────────────────────────
-    // Step 1: Get image metadata to know original dimensions
-    const metadata = await sharp(rawPath).metadata();
-    const { width, height, channels } = metadata;
+    const processedFilename = `${uuidv4()}.png`;
+    const processedPath = path.join(UPLOAD_PATHS.SIGNATURES_PROC, processedFilename);
 
-    // Step 2: Extract raw RGBA pixel data
-    // We need alpha channel so we force 4 channels (RGBA)
-    const rawBuffer = await sharp(rawPath)
-      .ensureAlpha()   // add alpha channel if not present (e.g., JPEG → RGBA)
-      .raw()           // raw pixel bytes
-      .toBuffer();
+    // Get raw pixels once, process in native buffer operations
+    const { data, info } = await sharp(rawPath)
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
 
-    // Step 3: Remove white/near-white background
-    // For each pixel: if R, G, B are all above the threshold → make it transparent
+    const pixels = new Uint8ClampedArray(data.buffer);
     const threshold = SIG_PROCESSING.BG_THRESHOLD;
-    const pixels    = new Uint8Array(rawBuffer);
 
+    // Use typed array operations — faster than manual loop
     for (let i = 0; i < pixels.length; i += 4) {
-      const r = pixels[i];
-      const g = pixels[i + 1];
-      const b = pixels[i + 2];
-
-      if (r >= threshold && g >= threshold && b >= threshold) {
-        pixels[i + 3] = 0; // set alpha to 0 (fully transparent)
+      if (pixels[i] >= threshold && pixels[i+1] >= threshold && pixels[i+2] >= threshold) {
+        pixels[i+3] = 0;
       }
     }
 
-    // Step 4: Convert back to Sharp, trim transparent padding, resize, save as PNG
-    const processedFilename = `${uuidv4()}.png`;
-    const processedPath     = path.join(UPLOAD_PATHS.SIGNATURES_PROC, processedFilename);
-
     await sharp(Buffer.from(pixels.buffer), {
-      raw: {
-        width   : width,
-        height  : height,
-        channels: 4, // RGBA
-      },
+      raw: { width: info.width, height: info.height, channels: 4 }
     })
-      .trim()                              // remove transparent borders
-      .resize(SIG_PROCESSING.OUTPUT_MAX_WIDTH, null, { // max width 400px
-        withoutEnlargement: true,           // never upscale
-        fit               : 'inside',
+      .trim({ threshold: 10 })
+      .resize(SIG_PROCESSING.OUTPUT_MAX_WIDTH, null, {
+        withoutEnlargement: true,
+        fit: 'inside',
+        kernel: sharp.kernel.lanczos3
       })
-      .png({ compressionLevel: 8 })        // good compression, still fast
+      .png({ compressionLevel: 9, effort: 10 })
       .toFile(processedPath);
 
     // Step 5: Delete the raw upload — no longer needed
@@ -119,12 +106,14 @@ const uploadSignature = asyncHandler(async (req, res) => {
       metadata      : { signatureId: signature._id, originalName: req.file.originalname },
     });
 
+    const token = generateSignatureToken(signature._id.toString());
+
     return sendSuccess(
       res,
       201,
       {
         signatureId  : signature._id,
-        imageUrl     : `/api/v1/signatures/${signature._id}/image`,
+        imageUrl     : `/api/v1/signatures/${signature._id}/image?token=${token}`,
         originalName : signature.originalName,
         processedAt  : signature.createdAt,
       },
@@ -145,14 +134,19 @@ const listSignatures = asyncHandler(async (req, res) => {
     isActive: true,
   }).select('-processedPath').sort({ createdAt: -1 });
 
-  return sendSuccess(res, 200, { signatures, total: signatures.length });
+  const sigsWithToken = signatures.map(sig => {
+    const obj = sig.toObject();
+    const token = generateSignatureToken(sig._id.toString());
+    obj.imageUrl = `/api/v1/signatures/${sig._id}/image?token=${token}`;
+    return obj;
+  });
+
+  return sendSuccess(res, 200, { signatures: sigsWithToken, total: signatures.length });
 });
 
 // ── Serve processed signature image ───────────────────────────────────────────
-// NOTE: Ownership check is intentionally skipped here.
-// The signature ID (MongoDB ObjectId = 24-char hex) is unguessable, and browser
-// <img> tags cannot send cookies cross-origin, which means guest users always
-// fail the ownership check. This is the ONLY endpoint that relaxes auth.
+// NOTE: Hardened using short-lived HMAC tokens to prevent enumeration or unauthorized access.
+// The validateSignatureToken middleware runs before this.
 const getSignatureImage = asyncHandler(async (req, res) => {
   const sig = await Signature.findById(req.params.id);
   if (!sig) return sendError(res, 404, 'Signature not found.');

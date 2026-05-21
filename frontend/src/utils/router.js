@@ -2,6 +2,8 @@
    ROUTER — Hash-based client-side routing
    ============================================================ */
 
+import { withErrorBoundary } from '../components/ErrorBoundary.js';
+
 export class Router {
   constructor() {
     this.routes = {};
@@ -31,16 +33,15 @@ export class Router {
     this.currentRoute = hash;
 
     if (route) {
+      window.scrollTo({ top: 0, behavior: 'instant' });
       const app = document.getElementById('app');
       if (app) {
         // Page transition
         app.classList.remove('page-container');
         void app.offsetWidth; // Force reflow
         app.classList.add('page-container');
-        // Support async route handlers (e.g. renderEditor)
-        Promise.resolve(route(app)).catch(err => {
-          console.error('[router] Route handler error:', err);
-        });
+        // Support async route handlers and wrap with ErrorBoundary
+        withErrorBoundary(app, route)();
       }
     } else {
       // Default to landing
