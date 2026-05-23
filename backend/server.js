@@ -34,9 +34,11 @@ const helmet       = require('helmet');
 const cors         = require('cors');
 const cookieParser = require('cookie-parser');
 const morgan       = require('morgan');
+const passport     = require('./config/passport');
 
 // Internal modules
 const connectDB          = require('./config/db');
+const { getConnectionState } = require('./config/db');
 const { setIO }          = require('./config/socket');
 const { initUploadDirs } = require('./services/storage.service');
 const { generalLimiter } = require('./middleware/rateLimit');
@@ -110,6 +112,9 @@ async function startServer() {
   // ── 9. Global rate limit ──────────────────────────────────────────────────────
   app.use(generalLimiter);
 
+  // ── Initialize Passport ───────────────────────────────────────────────────────
+  app.use(passport.initialize());
+
   // ── 10. API routes ────────────────────────────────────────────────────────────
   app.use('/api/v1/auth',       authRoutes);
   app.use('/api/v1/documents',  documentRoutes);
@@ -118,13 +123,42 @@ async function startServer() {
   app.use('/api/v1/audit',      auditRoutes);
 
   // ── 11. Health check ──────────────────────────────────────────────────────────
-  app.get('/api/v1/health', (_req, res) => res.json({
-    success  : true,
-    message  : 'LawSign API is operational.',
-    timestamp: new Date().toISOString(),
-    env      : process.env.NODE_ENV || 'development',
-    version  : '1.0.0',
-  }));
+  app.get('/api/v1/health', async (_req, res) => {
+    const dbState = getConnectionState();
+    const memUsage = process.memoryUsage();
+
+    // Measure DB ping time
+    let dbPingMs = null;
+    try {
+      const start = Date.now();
+      await require('mongoose').connection.db.admin().ping();
+      dbPingMs = Date.now() - start;
+    } catch {
+      dbPingMs = -1; // indicates ping failed
+    }
+
+    const isHealthy = dbState.readyState === 1;
+
+    res.status(isHealthy ? 200 : 503).json({
+      success  : isHealthy,
+      message  : isHealthy ? 'LawSign API is operational.' : 'LawSign API is degraded — database unavailable.',
+      timestamp: new Date().toISOString(),
+      env      : process.env.NODE_ENV || 'development',
+      version  : '1.0.0',
+      uptime   : Math.floor(process.uptime()),
+      database : {
+        status   : dbState.status,
+        host     : dbState.host,
+        name     : dbState.name,
+        pingMs   : dbPingMs,
+      },
+      memory: {
+        rss     : `${(memUsage.rss / 1024 / 1024).toFixed(1)} MB`,
+        heapUsed: `${(memUsage.heapUsed / 1024 / 1024).toFixed(1)} MB`,
+        heapTotal: `${(memUsage.heapTotal / 1024 / 1024).toFixed(1)} MB`,
+      },
+    });
+  });
 
   // ── 12. 404 — catch-all for unmatched routes ──────────────────────────────────
   app.use((_req, res) => res.status(404).json({

@@ -12,6 +12,7 @@ const { uploadLimiter }         = require('../middleware/rateLimit');
 const { signatureUploader }     = require('../config/multer');
 const validateRequestSize       = require('../middleware/validateRequestSize');
 const validateFileContent       = require('../middleware/validateFileContent');
+const validateImageIntelligence = require('../middleware/validateImageIntelligence');
 const { validateSignatureToken }= require('../utils/signatureToken');
 
 // POST /api/v1/signatures/upload — user or guest
@@ -22,6 +23,7 @@ router.post(
   validateRequestSize(5 * 1024 * 1024), // 5MB limit
   signatureUploader.single('signature'),
   validateFileContent,
+  validateImageIntelligence,
   uploadSignature
 );
 

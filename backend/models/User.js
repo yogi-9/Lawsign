@@ -39,9 +39,19 @@ const userSchema = new mongoose.Schema(
     // To include it you must explicitly do .select('+password').
     password: {
       type    : String,
-      required: [true, 'Password is required'],
+      required: [function() { return !this.googleId; }, 'Password is required'],
       minlength: [8, 'Password must be at least 8 characters'],
       select  : false,
+    },
+
+    googleId: {
+      type: String,
+      sparse: true,
+      unique: true
+    },
+
+    avatarUrl: {
+      type: String
     },
 
     plan: {
@@ -68,6 +78,8 @@ const userSchema = new mongoose.Schema(
   },
   {
     timestamps: true, // automatically manages createdAt and updatedAt
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
   }
 );
 
@@ -99,6 +111,27 @@ userSchema.methods.toPublicJSON = function () {
   const obj = this.toObject();
   delete obj.password;
   return obj;
+};
+
+// ── Virtual: document count ──────────────────────────────────────────────────
+// Usage: await user.populate('documentCount'); console.log(user.documentCount);
+userSchema.virtual('documentCount', {
+  ref: 'Document',
+  localField: '_id',
+  foreignField: 'userId',
+  count: true,
+});
+
+// ── Static: find user by email ───────────────────────────────────────────────
+// Usage: const user = await User.findByEmail('test@lawsign.in');
+userSchema.statics.findByEmail = function (email) {
+  return this.findOne({ email: email.toLowerCase().trim() });
+};
+
+// ── Static: find user by email with password ─────────────────────────────────
+// Usage: const user = await User.findByEmailWithPassword('test@lawsign.in');
+userSchema.statics.findByEmailWithPassword = function (email) {
+  return this.findOne({ email: email.toLowerCase().trim() }).select('+password');
 };
 
 const User = mongoose.model('User', userSchema);

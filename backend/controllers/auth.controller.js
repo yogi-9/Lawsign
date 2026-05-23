@@ -128,6 +128,30 @@ const logout = asyncHandler(async (req, res) => {
   return sendSuccess(res, 200, {}, 'Logged out successfully.');
 });
 
+// ── Google OAuth Callback ──────────────────────────────────────────────────────
+const googleCallback = asyncHandler(async (req, res) => {
+  // Passport provides the user object on req.user after successful authentication
+  if (!req.user) {
+    return res.redirect((process.env.FRONTEND_URL || 'http://localhost:5173') + '#/login?error=auth_failed');
+  }
+
+  // Set JWT in cookie
+  const token = createToken(req.user._id.toString());
+  res.cookie(COOKIE_NAME, token, cookieOptions());
+
+  // Audit trail
+  await AuditLog.create({
+    userId    : req.user._id,
+    action    : AUDIT_ACTIONS.USER_LOGIN,
+    ipAddress : _getClientIP(req),
+    userAgent : req.headers['user-agent'],
+    metadata  : { provider: 'google' }
+  });
+
+  // Redirect to dashboard
+  res.redirect((process.env.FRONTEND_URL || 'http://localhost:5173') + '#/dashboard');
+});
+
 // ── Create guest session ───────────────────────────────────────────────────────
 const createGuestSession = asyncHandler(async (req, res) => {
   const sessionId = uuidv4();
@@ -158,6 +182,7 @@ module.exports = {
   login,
   verify,
   logout,
+  googleCallback,
   createGuestSession,
   guestSessions, // exported for use in document controller
 };

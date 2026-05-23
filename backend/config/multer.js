@@ -39,7 +39,7 @@ const documentUploader = multer({
       cb(
         new multer.MulterError(
           'LIMIT_UNEXPECTED_FILE',
-          `File type not allowed. Accepted: PDF, DOCX, DOC, JPG, PNG, TIFF. Got: ${file.mimetype}`
+          `File type not allowed. Accepted: PDF, DOCX, DOC, JPG, PNG. Got: ${file.mimetype}`
         )
       );
     }

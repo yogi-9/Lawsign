@@ -123,6 +123,8 @@ const documentSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
   }
 );
 
@@ -133,6 +135,44 @@ documentSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 // ── Compound index for dashboard list query ────────────────────────────────────
 documentSchema.index({ userId: 1, createdAt: -1 });
+
+// ── Text index for search ──────────────────────────────────────────────────
+documentSchema.index({ originalName: 'text' });
+
+// ── Virtual: isExpired ─────────────────────────────────────────────────────
+documentSchema.virtual('isExpired').get(function () {
+  if (!this.expiresAt) return false;
+  return new Date() > this.expiresAt;
+});
+
+// ── Static: find documents by user with pagination ─────────────────────────
+// Usage: const { docs, total } = await Document.findByUser(userId, { page: 1, limit: 10, status: 'ready' });
+documentSchema.statics.findByUser = async function (userId, options = {}) {
+  const { page = 1, limit = 10, status, search } = options;
+  const skip = (page - 1) * limit;
+
+  const filter = { userId };
+  if (status) filter.processingStatus = status;
+  if (search) filter.originalName = { $regex: search, $options: 'i' };
+
+  const [docs, total] = await Promise.all([
+    this.find(filter)
+      .select('-storagePath -outputPath')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit),
+    this.countDocuments(filter),
+  ]);
+
+  return {
+    docs,
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit),
+    hasMore: page * limit < total,
+  };
+};
 
 const Document = mongoose.model('Document', documentSchema);
 module.exports = Document;

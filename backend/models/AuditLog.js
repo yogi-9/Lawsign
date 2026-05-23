@@ -102,5 +102,30 @@ auditLogSchema.pre(['deleteOne', 'deleteMany', 'findOneAndDelete'], function () 
   throw new Error('Audit logs cannot be deleted. They are permanent legal records.');
 });
 
+// ── Compound index: per-document audit trail ──────────────────────────────
+auditLogSchema.index({ documentId: 1, createdAt: -1 });
+
+// ── Static: create audit log entry ────────────────────────────────────────
+// Usage: await AuditLog.logAction({ req, documentId, action, metadata });
+auditLogSchema.statics.logAction = function ({ req, userId, guestSessionId, documentId, action, metadata = {} }) {
+  return this.create({
+    userId: userId || req?.user?._id || null,
+    guestSessionId: guestSessionId || req?.guestSessionId || null,
+    documentId: documentId || null,
+    action,
+    ipAddress: req?.headers?.['x-forwarded-for']?.split(',')[0]?.trim() || req?.socket?.remoteAddress || null,
+    userAgent: req?.headers?.['user-agent'] || null,
+    metadata,
+  });
+};
+
+// ── Static: get audit trail for a document ────────────────────────────────
+// Usage: const trail = await AuditLog.getDocumentTrail(documentId);
+auditLogSchema.statics.getDocumentTrail = function (documentId) {
+  return this.find({ documentId })
+    .sort({ createdAt: -1 })
+    .populate('userId', 'name email');
+};
+
 const AuditLog = mongoose.model('AuditLog', auditLogSchema);
 module.exports = AuditLog;

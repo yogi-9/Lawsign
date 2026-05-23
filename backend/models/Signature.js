@@ -62,5 +62,16 @@ const signatureSchema = new mongoose.Schema(
 // ── TTL index for guest signature cleanup ─────────────────────────────────────
 signatureSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
+// ── Compound index: user's active signatures ──────────────────────────────
+signatureSchema.index({ userId: 1, isActive: 1 });
+
+// ── Static: find active signatures for a user ─────────────────────────────
+// Usage: const sigs = await Signature.findActiveByUser(userId);
+signatureSchema.statics.findActiveByUser = function (userId) {
+  return this.find({ userId, isActive: true })
+    .select('-processedPath')
+    .sort({ createdAt: -1 });
+};
+
 const Signature = mongoose.model('Signature', signatureSchema);
 module.exports = Signature;

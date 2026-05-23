@@ -48,7 +48,6 @@ const ALLOWED_DOC_MIMETYPES = Object.freeze([
   'image/jpeg',
   'image/jpg',
   'image/png',
-  'image/tiff',
 ]);
 
 const ALLOWED_SIG_MIMETYPES = Object.freeze([

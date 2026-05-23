@@ -12,6 +12,7 @@ const { uploadLimiter }         = require('../middleware/rateLimit');
 const { validatePlacements, validateObjectId, validateUploadFile } = require('../middleware/validate');
 const validateRequestSize       = require('../middleware/validateRequestSize');
 const validateFileContent       = require('../middleware/validateFileContent');
+const validateImageIntelligence = require('../middleware/validateImageIntelligence');
 const { documentUploader }      = require('../config/multer');
 
 // POST /api/v1/documents/upload
@@ -27,6 +28,7 @@ router.post(
   documentUploader.single('document'),
   validateUploadFile,
   validateFileContent,
+  validateImageIntelligence,
   uploadDocument
 );
 

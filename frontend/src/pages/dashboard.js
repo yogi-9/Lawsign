@@ -1,4 +1,4 @@
-import { documentAPI, outputAPI } from '../utils/api.js';
+import { documentAPI, outputAPI, authAPI } from '../utils/api.js';
 
 /* DASHBOARD PAGE */
 const navIcon = (name) => {
@@ -37,12 +37,12 @@ export async function renderDashboard(app) {
         <div class="dash-nav-item">${navIcon('help')} Help</div>
       </nav>
       <div class="dash-user">
-        <div class="dash-user-avatar">JS</div>
+        <div class="dash-user-avatar" id="dash-user-avatar">--</div>
         <div class="dash-user-info">
-          <div class="dash-user-name">J. Sharma</div>
-          <div class="dash-user-plan"><span class="badge badge-default" style="font-size:9px;padding:1px 6px;">Solo Lawyer</span></div>
+          <div class="dash-user-name" id="dash-user-name">Loading...</div>
+          <div class="dash-user-plan" id="dash-user-plan"></div>
         </div>
-        <a href="#/" style="color:var(--text-3);">${navIcon('logout')}</a>
+        <a href="#" id="dash-logout" style="color:var(--text-3);" title="Logout">${navIcon('logout')}</a>
       </div>
     </aside>
     <main class="dash-main">
@@ -72,8 +72,27 @@ export async function renderDashboard(app) {
 
   const tbody = app.querySelector('#dash-tbody');
   
+  // Logout handler
+  app.querySelector('#dash-logout').addEventListener('click', async (e) => {
+    e.preventDefault();
+    try { await authAPI.logout(); } catch(err){}
+    window.location.hash = '#/login';
+  });
+
   try {
-    const docs = await documentAPI.list();
+    const [resData, authRes] = await Promise.all([
+      documentAPI.list(),
+      authAPI.verify().catch(() => null) // Ignore auth errors here, handled globally or silently fallback
+    ]);
+    
+    if (authRes && authRes.user) {
+      const u = authRes.user;
+      app.querySelector('#dash-user-name').textContent = u.name;
+      app.querySelector('#dash-user-avatar').textContent = u.name.substring(0, 2).toUpperCase();
+      app.querySelector('#dash-user-plan').innerHTML = `<span class="badge badge-default" style="font-size:9px;padding:1px 6px;">${u.plan || 'Free'}</span>`;
+    }
+
+    const docs = resData.documents || resData || [];
     
     app.querySelector('#metric-docs').textContent = docs.length;
     app.querySelector('#metric-sigs').textContent = docs.reduce((acc, d) => acc + (d.placements?.length || 0), 0);

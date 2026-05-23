@@ -115,13 +115,20 @@ const getDocument = asyncHandler(async (req, res) => {
 // ── List documents ────────────────────────────────────────────────────────────
 const listDocuments = asyncHandler(async (req, res) => {
   const { status, search, page = 1, limit = 10 } = req.query;
-  const filter = { userId: req.user._id };
-  if (status) filter.processingStatus = status;
-  if (search) filter.originalName = { $regex: search, $options: 'i' };
-  const skip  = (parseInt(page, 10) - 1) * parseInt(limit, 10);
-  const total = await Document.countDocuments(filter);
-  const docs  = await Document.find(filter).select('-storagePath -outputPath').sort({ createdAt: -1 }).skip(skip).limit(parseInt(limit, 10));
-  return sendSuccess(res, 200, { documents: docs, total, page: parseInt(page, 10), totalPages: Math.ceil(total / parseInt(limit, 10)) });
+  const result = await Document.findByUser(req.user._id, { 
+    status, 
+    search, 
+    page: parseInt(page, 10), 
+    limit: parseInt(limit, 10) 
+  });
+  
+  return sendSuccess(res, 200, { 
+    documents: result.docs, 
+    total: result.total, 
+    page: result.page, 
+    totalPages: result.totalPages,
+    hasMore: result.hasMore
+  });
 });
 
 // ── Save placements ────────────────────────────────────────────────────────────
