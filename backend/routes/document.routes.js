@@ -6,7 +6,7 @@
  */
 
 const router = require('express').Router();
-const { uploadDocument, getDocument, listDocuments, savePlacements, getPageImage, deleteDocument } = require('../controllers/document.controller');
+const { uploadDocument, getDocument, listDocuments, savePlacements, getPageImage, deleteDocument, renameDocument } = require('../controllers/document.controller');
 const { protect, optionalAuth } = require('../middleware/auth');
 const { uploadLimiter }         = require('../middleware/rateLimit');
 const { validatePlacements, validateObjectId, validateUploadFile } = require('../middleware/validate');
@@ -46,5 +46,8 @@ router.get('/:id/page/:page', optionalAuth, validateObjectId('id'), getPageImage
 
 // DELETE /api/v1/documents/:id
 router.delete('/:id', protect, validateObjectId('id'), deleteDocument);
+
+// PUT /api/v1/documents/:id/rename
+router.put('/:id/rename', protect, validateObjectId('id'), renameDocument);
 
 module.exports = router;

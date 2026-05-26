@@ -197,4 +197,23 @@ const deleteDocument = asyncHandler(async (req, res) => {
   return sendSuccess(res, 200, {}, 'Document deleted.');
 });
 
-module.exports = { uploadDocument, getDocument, listDocuments, savePlacements, getPageImage, deleteDocument };
+// ── Rename document ────────────────────────────────────────────────────────────
+const renameDocument = asyncHandler(async (req, res) => {
+  const doc = await Document.findById(req.params.id);
+  if (!doc) return sendError(res, 404, 'Document not found.');
+  if (doc.userId?.toString() !== req.user._id.toString()) return sendError(res, 403, 'Access denied.');
+  const { newName } = req.body;
+  if (!newName) return sendError(res, 400, 'New name is required.');
+  
+  doc.originalName = newName;
+  await doc.save();
+  
+  await AuditLog.create({
+    userId: req.user._id, documentId: doc._id, action: AUDIT_ACTIONS.DOCUMENT_RENAMED || 'DOCUMENT_RENAMED',
+    ipAddress: _ip(req), userAgent: req.headers['user-agent'], metadata: { newName },
+  });
+  
+  return sendSuccess(res, 200, { originalName: doc.originalName }, 'Document renamed.');
+});
+
+module.exports = { uploadDocument, getDocument, listDocuments, savePlacements, getPageImage, deleteDocument, renameDocument };

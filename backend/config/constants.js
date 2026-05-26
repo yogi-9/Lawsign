@@ -38,6 +38,7 @@ const AUDIT_ACTIONS = Object.freeze({
   USER_LOGOUT        : 'user_logout',
   DOCUMENT_DELETED   : 'document_deleted',
   SIGNATURE_DELETED  : 'signature_deleted',
+  DOCUMENT_RENAMED   : 'document_renamed',
 });
 
 // ── Allowed file types ────────────────────────────────────────────────────────

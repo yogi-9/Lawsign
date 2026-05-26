@@ -112,6 +112,7 @@ export const documentAPI = {
   get          : (id)              => _req('GET',  `/documents/${id}`),
   list         : ()                => _req('GET',  '/documents/'),
   savePlacements: (id, placements) => _req('PUT',  `/documents/${id}/placements`, { placements }),
+  rename       : (id, newName)     => _req('PUT',  `/documents/${id}/rename`, { newName }),
   delete       : (id)              => _req('DELETE',`/documents/${id}`),
   // URL for <img src="..."> — serves document page as image (with cookies)
   pageImageUrl : (id, page) => `${BASE}/documents/${id}/page/${page}`,
@@ -125,6 +126,7 @@ export const signatureAPI = {
     return _req('POST', '/signatures/upload', fd, true);
   },
   list  : () => _req('GET', '/signatures/'),
+  delete: (id) => _req('DELETE', `/signatures/${id}`),
   // Image URL for <img src="..."> — served directly by backend
   // Note: For security hardening, this will be changed to generate signed URLs later
   imageUrl: (id) => `${BASE}/signatures/${id}/image`,

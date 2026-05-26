@@ -67,10 +67,6 @@ const validatePlacements = (req, res, next) => {
     return sendError(res, 400, 'Placements must be an array.');
   }
 
-  if (placements.length === 0) {
-    return sendError(res, 400, 'At least one placement is required.');
-  }
-
   for (let i = 0; i < placements.length; i++) {
     const p = placements[i];
     if (typeof p.page !== 'number' || p.page < 1) {

@@ -12,7 +12,7 @@ let sigCounter = 0;
 let sigUrl = null;
 
 export async function renderEditor(app) {
-  if (!store.documentId || !store.signatureId) {
+  if (!store.documentId) {
     app.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:16px;">
       <p style="color:var(--text-2);">No document loaded.</p><a href="#/upload" class="btn btn-primary">← Upload</a></div>`;
     return;
@@ -26,6 +26,20 @@ export async function renderEditor(app) {
   app.innerHTML = buildShell(docName, fields, pages, docId, isPDF);
   await loadDocPages(app, docId, pages, isPDF);
   wireAll(app, { fields, sigId, docId, docName, pages });
+  
+  // Restore previously saved placements
+  if (store.placements && store.placements.length > 0) {
+    store.placements.forEach(p => {
+      const ov = app.querySelector(`#overlay-${p.page}`);
+      if (ov) {
+        const leftPct = p.leftPct !== undefined ? p.leftPct : (p.x / PW) * 100;
+        const topPct = p.topPct !== undefined ? p.topPct : (p.y / PH) * 100;
+        const widthPct = p.widthPct !== undefined ? p.widthPct : (p.width / PW) * 100;
+        const heightPct = p.heightPct !== undefined ? p.heightPct : (p.height / PH) * 100;
+        placeSig(ov, leftPct, topPct, widthPct, heightPct);
+      }
+    });
+  }
 }
 
 function buildShell(docName, fields, pages, docId, isPDF) {
@@ -140,10 +154,10 @@ function renderImg(c, url) {
 }
 
 // ── Place a signature on a page ──────────────────────────────────────────────
-function placeSig(overlay, leftPct, topPct, widthPct) {
+function placeSig(overlay, leftPct, topPct, widthPct, savedHeightPct = null) {
   const id = ++sigCounter;
   const page = parseInt(overlay.dataset.page);
-  const hPct = widthPct * 0.35; // aspect ratio approx
+  const hPct = savedHeightPct !== null ? savedHeightPct : (widthPct * 0.35); // aspect ratio approx
   const wrap = document.createElement('div');
   wrap.className = 'placed-sig-wrap';
   wrap.dataset.sigId = id;
@@ -259,7 +273,6 @@ function updateGenBtn() {
   if (btn) { btn.disabled = placedSigs.length === 0; btn.classList.toggle('disabled', !placedSigs.length); }
 }
 
-// ── Build placements array for backend (CSS% → PDF points) ───────────────────
 function buildPlacements(sigId) {
   return placedSigs.map(s => ({
     page: s.page,
@@ -272,7 +285,7 @@ function buildPlacements(sigId) {
     widthPct: s.widthPct,
     heightPct: s.heightPct,
     rotation: 0,
-    signatureId: sigId,
+    signatureId: sigId || store.signatureId, // fallback to store if sigId is null
   }));
 }
 
@@ -356,8 +369,12 @@ function wireAll(app, { fields, sigId, docId, docName, pages }) {
 
   // Save
   app.querySelector('#btn-save')?.addEventListener('click', async () => {
-    if (!placedSigs.length) return;
-    try { await documentAPI.savePlacements(docId, buildPlacements(sigId)); toast('Placements saved ✓'); } catch(e) { toast('Save failed: '+e.message, true); }
+    try { 
+      await documentAPI.savePlacements(docId, buildPlacements(sigId)); 
+      toast('Placements saved ✓'); 
+    } catch(e) { 
+      toast('Save failed: '+e.message, true); 
+    }
   });
 
   // Generate buttons
