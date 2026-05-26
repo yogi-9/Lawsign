@@ -4,18 +4,11 @@
  * controllers/signature.controller.js
  * Handles signature image upload and processing.
  *
- * Processing pipeline (Sharp):
- *  1. Read raw uploaded PNG/JPG/WEBP
- *  2. Convert to raw RGBA pixel buffer
- *  3. Remove white/near-white background by zeroing alpha channel
- *  4. Trim transparent edges
- *  5. Resize to max 400px wide (maintain aspect ratio)
- *  6. Save as PNG (PNG preserves transparency; JPEG does not)
- *  7. Delete raw file from disk
+ * Processing is delegated to services/bgRemoval.service.js which tries
+ * the Python rembg microservice first, then falls back to Sharp.
  */
 
 const path       = require('path');
-const sharp      = require('sharp');
 const Signature  = require('../models/Signature');
 const AuditLog   = require('../models/AuditLog');
 const asyncHandler    = require('../utils/asyncHandler');
@@ -25,7 +18,6 @@ const {
   UPLOAD_PATHS,
   GUEST_SESSION_HOURS,
   AUDIT_ACTIONS,
-  SIG_PROCESSING,
 } = require('../config/constants');
 const { v4: uuidv4 }  = require('uuid');
 const { generateSignatureToken } = require('../utils/signatureToken');
@@ -40,37 +32,12 @@ const uploadSignature = asyncHandler(async (req, res) => {
   const rawPath = req.file.path;
 
   try {
-    // ── Sharp processing pipeline ─────────────────────────────────────────────
+    // ── Background removal (Python microservice → Sharp fallback) ───────────────
     const processedFilename = `${uuidv4()}.png`;
     const processedPath = path.join(UPLOAD_PATHS.SIGNATURES_PROC, processedFilename);
 
-    // Get raw pixels once, process in native buffer operations
-    const { data, info } = await sharp(rawPath)
-      .ensureAlpha()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-
-    const pixels = new Uint8ClampedArray(data.buffer);
-    const threshold = SIG_PROCESSING.BG_THRESHOLD;
-
-    // Use typed array operations — faster than manual loop
-    for (let i = 0; i < pixels.length; i += 4) {
-      if (pixels[i] >= threshold && pixels[i+1] >= threshold && pixels[i+2] >= threshold) {
-        pixels[i+3] = 0;
-      }
-    }
-
-    await sharp(Buffer.from(pixels.buffer), {
-      raw: { width: info.width, height: info.height, channels: 4 }
-    })
-      .trim({ threshold: 10 })
-      .resize(SIG_PROCESSING.OUTPUT_MAX_WIDTH, null, {
-        withoutEnlargement: true,
-        fit: 'inside',
-        kernel: sharp.kernel.lanczos3
-      })
-      .png({ compressionLevel: 9, effort: 10 })
-      .toFile(processedPath);
+    const { removeBackground } = require('../services/bgRemoval.service');
+    await removeBackground(rawPath, processedPath);
 
     // Step 5: Delete the raw upload — no longer needed
     deleteFile(rawPath);

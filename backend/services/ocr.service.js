@@ -68,7 +68,7 @@ const detectSignatureFields = async (filePath, mimeType) => {
     }
 
     if (mimeType.startsWith('image/')) {
-      return _processImageFile();
+      return await _processImageFile(filePath);
     }
 
     // DOCX / DOC — treat as two-field document for now
@@ -134,36 +134,81 @@ const _processPDF = async (filePath) => {
     }
   });
 
-  // If no fields detected at all, fall back to heuristic defaults
-  return fields.length > 0 ? fields : _processImageFile(pageCount);
+  // If no text fields detected at all, try OCR on the PDF as if it were an image
+  return fields.length > 0 ? fields : await _processImageFile(filePath);
 };
 
-// ── Image / scan heuristic positioning ────────────────────────────────────────
-// Based on common Indian legal document conventions:
-//   - Primary signature: bottom-right of last page
-//   - Witness: below primary, slightly left
-const _processImageFile = (pageCount = 1) => [
-  {
-    page      : pageCount,
-    x         : PAGE_WIDTH - 220,           // right side
-    y         : MARGIN + 80,                // near bottom (PDF: y=0 is bottom)
-    width     : DEFAULT_SIG_FIELD.width,
-    height    : DEFAULT_SIG_FIELD.height,
-    confidence: OCR.CONFIDENCE.HEURISTIC,
-    label     : 'Primary Signature',
-  },
-  {
-    page      : pageCount,
-    x         : MARGIN,                     // left side
-    y         : MARGIN + 80,
-    width     : DEFAULT_SIG_FIELD.width,
-    height    : DEFAULT_SIG_FIELD.height,
-    confidence: OCR.CONFIDENCE.HEURISTIC,
-    label     : 'Witness Signature',
-  },
-];
+const Tesseract = require('tesseract.js');
+
+const _processImageFile = async (filePath) => {
+  try {
+    const fields = [];
+    
+    // Tesseract v7 requires a worker and explicit output options to return detailed bounding boxes
+    const worker = await Tesseract.createWorker('eng');
+    const { data } = await worker.recognize(filePath, {}, { blocks: true });
+    await worker.terminate();
+    
+    // Flatten lines from blocks -> paragraphs -> lines
+    const lines = data.blocks ? data.blocks.flatMap(b => b.paragraphs.flatMap(p => p.lines)) : [];
+    
+    // We will scan lines for our keywords.
+    for (const line of lines) {
+      if (!line || !line.text) continue;
+      const text = line.text.trim();
+      
+      for (const pattern of ALL_PATTERNS) {
+        if (pattern.regex.test(text)) {
+          // Found a match! Use the bounding box of this line.
+          // Tesseract bbox is { x0, y0, x1, y1 } where 0,0 is top-left
+          const bbox = line.bbox;
+          
+          // Convert pixel coordinates to PDF point percentages (approximate A4 aspect ratio)
+          // Since we don't know the exact image size here in terms of standard A4, 
+          // we normalize the bbox against the image dimensions.
+          const imgWidth = data.width || PAGE_WIDTH;
+          const imgHeight = data.height || PAGE_HEIGHT;
+          
+          // PDF coordinates: origin is bottom-left, but our frontend editor expects PDF coordinates 
+          // where y is from bottom (y=0 is bottom).
+          // However, the frontend calculates topPct as: (((PH - f.y - f.height) / PH) * 100)
+          // which implies f.y is distance from the bottom.
+          // Tesseract y0 is distance from the top.
+          const pdfX = (bbox.x0 / imgWidth) * PAGE_WIDTH;
+          // To get distance from bottom:
+          const distFromBottom = imgHeight - bbox.y1;
+          const pdfY = (distFromBottom / imgHeight) * PAGE_HEIGHT;
+          
+          // For width and height, we can use default size so the signature isn't tiny
+          
+          fields.push({
+            page: 1,
+            x: pdfX,
+            y: pdfY - 20, // shift slightly below the text
+            width: DEFAULT_SIG_FIELD.width,
+            height: DEFAULT_SIG_FIELD.height,
+            confidence: pattern.confidence,
+            label: pattern.label,
+          });
+          
+          break; // move to next line
+        }
+      }
+    }
+    
+    if (fields.length > 0) {
+      return fields;
+    }
+    
+    // If OCR found nothing, return empty array instead of dummy fields
+    return [];
+  } catch (err) {
+    console.error('[ocr] Tesseract failed:', err);
+    return [];
+  }
+};
 
 // ── Default two-field fallback ─────────────────────────────────────────────────
-const _defaultTwoFields = () => _processImageFile(1);
+const _defaultTwoFields = () => [];
 
 module.exports = { detectSignatureFields };

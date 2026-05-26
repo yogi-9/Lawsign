@@ -12,7 +12,9 @@
     "db:health": "node scripts/db-health.js",
     "db:migrate": "node scripts/db-migrate.js",
     "db:backup": "node scripts/db-backup.js",
-    "db:restore": "node scripts/db-restore.js"
+    "db:restore": "node scripts/db-restore.js",
+    "python:bg": "cd python && python bg_remover.py",
+    "dev:full": "concurrently \"npm run dev\" \"npm run python:bg\""
   },
   "keywords": [
     "lawsign",

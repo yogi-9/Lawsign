@@ -27,7 +27,7 @@ export async function renderEditor(app) {
   await loadDocPages(app, docId, pages, isPDF);
   wireAll(app, { fields, sigId, docId, docName, pages });
   
-  // Restore previously saved placements
+  // Restore previously saved placements or auto-place detected fields
   if (store.placements && store.placements.length > 0) {
     store.placements.forEach(p => {
       const ov = app.querySelector(`#overlay-${p.page}`);
@@ -37,6 +37,19 @@ export async function renderEditor(app) {
         const widthPct = p.widthPct !== undefined ? p.widthPct : (p.width / PW) * 100;
         const heightPct = p.heightPct !== undefined ? p.heightPct : (p.height / PH) * 100;
         placeSig(ov, leftPct, topPct, widthPct, heightPct);
+      }
+    });
+  } else if (fields && fields.length > 0) {
+    // Auto-place signatures into detected fields
+    fields.forEach(f => {
+      const ov = app.querySelector(`#overlay-${f.page}`);
+      if (ov) {
+        const leftPct = (f.x / PW) * 100;
+        const topPct = ((PH - f.y - f.height) / PH) * 100;
+        const widthPct = (f.width / PW) * 100;
+        const heightPct = (f.height / PH) * 100;
+        // place the signature. We use clamp to ensure it stays within bounds
+        placeSig(ov, clamp(leftPct, 0, 95), clamp(topPct, 0, 95), Math.max(widthPct, 15), Math.max(heightPct, 5));
       }
     });
   }
@@ -61,12 +74,7 @@ function buildShell(docName, fields, pages, docId, isPDF) {
     <div class="sig-preview-box" id="sig-src" draggable="true">
       ${sigUrl ? `<img src="${sigUrl}" crossorigin="use-credentials" style="max-width:100%;max-height:60px">` : `<span style="font-family:cursive;font-size:1.3rem;color:#1a1a2e">Signature</span>`}
     </div>
-    <p class="sig-preview-hint">Drag onto document or click on page</p>
-    <div class="divider"></div>
-    <div class="checklist-section">
-      <span class="section-label">Detected Fields</span>
-      <div id="checklist">${fields.length ? fields.map((f,i)=>`<div class="checklist-item" data-idx="${i}"><span>${f.label||'Signature'}</span><span class="page-num">P${f.page}</span></div>`).join('') : `<p style="font-size:var(--text-xs);color:var(--text-3)">Click anywhere on the document to place signature.</p>`}</div>
-    </div>
+    <p class="sig-preview-hint">Drag onto document or click on page to add manually</p>
   </div>
   <div class="editor-canvas" id="editor-canvas">${buildPages(fields, pages)}</div>
   <div class="editor-sidebar-right">
@@ -94,14 +102,7 @@ function buildPages(fields, pages) {
           <div style="width:32px;height:32px;border:3px solid var(--border-1);border-top-color:var(--accent-indigo);border-radius:50%;animation:spin 1s linear infinite"></div>
           Loading page ${p}...</div>
       </div>
-      <div class="sig-overlay" id="overlay-${p}" data-page="${p}">
-        ${pf.map(f=>{
-          const gi=fields.indexOf(f);
-          const l=((f.x/PW)*100).toFixed(2), t=(((PH-f.y-f.height)/PH)*100).toFixed(2);
-          const w=((f.width/PW)*100).toFixed(2), ht=((f.height/PH)*100).toFixed(2);
-          return `<div class="sig-zone" data-gi="${gi}" style="left:${l}%;top:${t}%;width:${w}%;height:${ht}%"><span class="sig-zone-label">${f.label||'Sign here'}</span></div>`;
-        }).join('')}
-      </div>
+      <div class="sig-overlay" id="overlay-${p}" data-page="${p}"></div>
     </div>`;
     if (p < pages) h += `<div class="page-divider">Page ${p+1}</div>`;
   }
@@ -297,29 +298,7 @@ function wireAll(app, { fields, sigId, docId, docName, pages }) {
   app.querySelector('#btn-zoom-in')?.addEventListener('click', () => { zoom = Math.min(zoom+10,200); cv.style.zoom=zoom/100; app.querySelector('#zoom-label').textContent=zoom+'%'; });
   app.querySelector('#btn-zoom-out')?.addEventListener('click', () => { zoom = Math.max(zoom-10,50); cv.style.zoom=zoom/100; app.querySelector('#zoom-label').textContent=zoom+'%'; });
 
-  // Checklist click to scroll and highlight
-  const checklist = app.querySelector('#checklist');
-  if (checklist) {
-    checklist.addEventListener('click', (e) => {
-      const item = e.target.closest('[data-idx]');
-      if (!item) return;
 
-      const idx = parseInt(item.dataset.idx);
-      const field = fields[idx];
-      if (!field) return;
-
-      // Find the sig-zone for this field and scroll to it
-      const zone = app.querySelector(`.sig-zone[data-gi="${idx}"]`);
-      if (zone) {
-        zone.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        // Flash the zone to draw attention
-        zone.style.background = 'rgba(99,102,241,0.2)';
-        setTimeout(() => {
-          zone.style.background = '';
-        }, 1000);
-      }
-    });
-  }
 
   // Toggles
   app.querySelectorAll('.toggle').forEach(t => t.addEventListener('click', () => t.classList.toggle('active')));
@@ -335,16 +314,7 @@ function wireAll(app, { fields, sigId, docId, docName, pages }) {
     });
   });
 
-  // Click on OCR zone to place signature there
-  app.querySelectorAll('.sig-zone').forEach(z => {
-    z.addEventListener('click', e => {
-      e.stopPropagation();
-      const ov = z.closest('.sig-overlay');
-      const lPct = parseFloat(z.style.left), tPct = parseFloat(z.style.top), wPct = parseFloat(z.style.width);
-      placeSig(ov, lPct, tPct, Math.max(wPct, 20));
-      z.classList.add('used');
-    });
-  });
+
 
   // Drag from sidebar
   const sigSrc = app.querySelector('#sig-src');
