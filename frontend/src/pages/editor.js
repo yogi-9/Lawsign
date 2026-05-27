@@ -44,11 +44,22 @@ export async function renderEditor(app) {
     fields.forEach(f => {
       const ov = app.querySelector(`#overlay-${f.page}`);
       if (ov) {
-        const leftPct = (f.x / PW) * 100;
-        const topPct = ((PH - f.y - f.height) / PH) * 100;
-        const widthPct = (f.width / PW) * 100;
-        const heightPct = (f.height / PH) * 100;
-        // place the signature. We use clamp to ensure it stays within bounds
+        let leftPct, topPct, widthPct, heightPct;
+
+        if (f.xPct !== undefined && f.yPct !== undefined) {
+          // ── New format: backend sends percentages directly (top-left origin)
+          leftPct   = f.xPct;
+          topPct    = f.yPct;
+          widthPct  = f.widthPct || 25;
+          heightPct = f.heightPct || 7;
+        } else {
+          // ── Legacy format: convert from PDF points (bottom-left origin)
+          leftPct   = (f.x / PW) * 100;
+          topPct    = ((PH - f.y - f.height) / PH) * 100;
+          widthPct  = (f.width / PW) * 100;
+          heightPct = (f.height / PH) * 100;
+        }
+
         placeSig(ov, clamp(leftPct, 0, 95), clamp(topPct, 0, 95), Math.max(widthPct, 15), Math.max(heightPct, 5));
       }
     });

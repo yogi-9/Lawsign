@@ -2,213 +2,359 @@
 
 /**
  * services/ocr.service.js
- * Phase 1: Intelligent signature field detection WITHOUT Python OCR.
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Signature field detection for PDFs and scanned images.
  *
- * Strategy:
- *  - For text-based PDFs: extract text via pdf-parse, scan for signature keywords
- *    and underscore patterns with confidence scoring.
- *  - For image files (scans): use heuristic positioning based on standard
- *    Indian legal document conventions (signature bottom-right, witnesses below).
+ * Architecture:
+ *   1. EXTRACT  — Pull text + positions from the document (pdfjs / Tesseract)
+ *   2. CLASSIFY — Run each text item through the keyword classifier
+ *   3. FILTER   — Reject false positives (body-text mentions, wrong page zone)
+ *   4. DEDUP    — Merge overlapping detections
  *
- * Returns: Array<{ page, x, y, width, height, confidence, label }>
- *
- * Phase 2 upgrade: Replace _processImageFile() with a Python Tesseract bridge
- * via child_process.spawn() — only this file changes.
+ * Coordinate convention (output):
+ *   { page, xPct, yPct, widthPct, heightPct }
+ *   All values are PERCENTAGES of page dimensions (0–100).
+ *   Origin is top-left (CSS convention), so the frontend can use them directly.
+ *   This eliminates all coordinate-system conversion bugs.
+ * ─────────────────────────────────────────────────────────────────────────────
  */
 
-const pdfParse = require('pdf-parse');
-const fs       = require('fs');
+const fs = require('fs');
 const { OCR, DEFAULT_SIG_FIELD } = require('../config/constants');
 
-// ── Signature keyword patterns ─────────────────────────────────────────────────
-// English legal document patterns
-const ENGLISH_PATTERNS = [
-  { regex: /signature\s*of\s*(party|person|applicant|claimant|defendant|plaintiff|witness|notary)?/i, label: 'Signature', confidence: OCR.CONFIDENCE.DIRECT_LABEL },
-  { regex: /signed\s+by\s*:/i,                   label: 'Signed By',        confidence: OCR.CONFIDENCE.DIRECT_LABEL },
-  { regex: /authorized\s+signatory/i,             label: 'Authorized Signatory', confidence: OCR.CONFIDENCE.DIRECT_LABEL },
-  { regex: /signature\s*:/i,                      label: 'Signature',        confidence: OCR.CONFIDENCE.DIRECT_LABEL },
-  { regex: /sign\s+here/i,                        label: 'Sign Here',        confidence: OCR.CONFIDENCE.DIRECT_LABEL },
-  { regex: /party\s+[12aAbB]\s*(signature)?/i,    label: 'Party Signature',  confidence: OCR.CONFIDENCE.PARTY_REF },
-  { regex: /witness\s*(signature)?/i,             label: 'Witness',          confidence: OCR.CONFIDENCE.PARTY_REF },
-  { regex: /notary\s+public/i,                    label: 'Notary Public',    confidence: OCR.CONFIDENCE.PARTY_REF },
-  { regex: /executor\s*(signature)?/i,            label: 'Executor',         confidence: OCR.CONFIDENCE.PARTY_REF },
-  { regex: /guarantor\s*(signature)?/i,           label: 'Guarantor',        confidence: OCR.CONFIDENCE.PARTY_REF },
-  { regex: /lessor\s*(signature)?/i,              label: 'Lessor',           confidence: OCR.CONFIDENCE.PARTY_REF },
-  { regex: /lessee\s*(signature)?/i,              label: 'Lessee',           confidence: OCR.CONFIDENCE.PARTY_REF },
-];
+// ═════════════════════════════════════════════════════════════════════════════
+//  KEYWORD PATTERNS
+// ═════════════════════════════════════════════════════════════════════════════
 
-// Hindi / regional language legal terms (Devanagari)
-const HINDI_PATTERNS = [
-  { regex: /हस्ताक्षर/,  label: 'हस्ताक्षर (Signature)', confidence: OCR.CONFIDENCE.DIRECT_LABEL },
-  { regex: /साक्षी/,     label: 'साक्षी (Witness)',      confidence: OCR.CONFIDENCE.PARTY_REF },
-  { regex: /नोटरी/,     label: 'नोटरी (Notary)',        confidence: OCR.CONFIDENCE.PARTY_REF },
-];
-
-// Visual underscore sequence (classic blank signing line: ____________)
-const UNDERSCORE_PATTERN = new RegExp(`_{${OCR.MIN_UNDERSCORES},}`, 'g');
-
-const ALL_PATTERNS = [...ENGLISH_PATTERNS, ...HINDI_PATTERNS];
-
-// ── Standard A4 PDF dimensions (in PDF points: 1pt = 1/72 inch) ───────────────
-const PAGE_WIDTH  = 595;  // A4 width  in points
-const PAGE_HEIGHT = 842;  // A4 height in points
-const MARGIN      = 72;   // standard 1-inch margin in points
-
-// ── Main export ────────────────────────────────────────────────────────────────
 /**
- * Detect signature fields in an uploaded document.
- * @param {string} filePath   - Absolute path to the file on disk
- * @param {string} mimeType   - File mimetype
- * @returns {Promise<Array>}  - Detected fields
+ * PRIMARY patterns — explicit signature instructions.
+ * These are reliable regardless of where they appear on the page.
+ * Each regex is tested against individual WORDS or SHORT phrases,
+ * NOT full paragraph lines, to avoid body-text false positives.
  */
+const PRIMARY_PATTERNS = [
+  // "Signature:" label (the most common indicator)
+  { regex: /^signature\s*[:;]\s*[_\-\.]*$/i,       label: 'Signature' },
+  { regex: /^signature\s*$/i,                       label: 'Signature' },
+  // "Sign Here" instruction
+  { regex: /sign\s*here/i,                          label: 'Sign Here' },
+  // "Authorized Signatory" label
+  { regex: /^authorized\s+signatory/i,              label: 'Authorized Signatory' },
+  // Hindi
+  { regex: /हस्ताक्षर/,                              label: 'हस्ताक्षर (Signature)' },
+];
+
+/**
+ * SECONDARY patterns — role headings in signature blocks.
+ * Only matched against SHORT, STANDALONE text (≤25 chars)
+ * to avoid matching "Both parties agree…" type sentences.
+ */
+const SECONDARY_PATTERNS = [
+  { regex: /^party\s*[aAbB12]\s*$/i,    label: 'Party Signature' },
+  { regex: /^witness\s*[:\d]*$/i,       label: 'Witness' },
+  { regex: /^notary\s*public\s*$/i,     label: 'Notary Public' },
+  { regex: /^landlord\s*$/i,            label: 'Landlord' },
+  { regex: /^tenant\s*$/i,              label: 'Tenant' },
+  { regex: /^lessor\s*$/i,              label: 'Lessor' },
+  { regex: /^lessee\s*$/i,              label: 'Lessee' },
+  { regex: /^buyer\s*$/i,              label: 'Buyer' },
+  { regex: /^seller\s*$/i,             label: 'Seller' },
+  { regex: /^guarantor\s*$/i,          label: 'Guarantor' },
+  { regex: /^executor\s*$/i,           label: 'Executor' },
+];
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  CLASSIFIER
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Classify a text string. Returns { label, confidence } or null.
+ * @param {string} text - The text to classify
+ */
+function classify(text) {
+  const t = text.trim();
+  if (!t) return null;
+
+  // Primary: always accept
+  for (const p of PRIMARY_PATTERNS) {
+    if (p.regex.test(t)) {
+      return { label: p.label, confidence: OCR.CONFIDENCE.DIRECT_LABEL };
+    }
+  }
+
+  // Secondary: only accept short standalone labels (≤25 chars)
+  if (t.length <= 25) {
+    for (const p of SECONDARY_PATTERNS) {
+      if (p.regex.test(t)) {
+        return { label: p.label, confidence: OCR.CONFIDENCE.PARTY_REF };
+      }
+    }
+  }
+
+  return null;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  DEDUPLICATION
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Merge fields that are close together on both axes.
+ * Two fields are "overlapping" if they're within 4% vertically AND 15% horizontally.
+ * Keeps the higher-confidence detection.
+ */
+function dedup(fields) {
+  if (fields.length <= 1) return fields;
+
+  const sorted = fields.slice().sort((a, b) => a.yPct - b.yPct);
+  const result = [];
+
+  for (const field of sorted) {
+    const overlap = result.find(f =>
+      f.page === field.page &&
+      Math.abs(f.yPct - field.yPct) < 4 &&
+      Math.abs(f.xPct - field.xPct) < 15
+    );
+    if (overlap) {
+      if (field.confidence > overlap.confidence) Object.assign(overlap, field);
+    } else {
+      result.push({ ...field });
+    }
+  }
+
+  return result;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  FIELD FACTORY
+// ═════════════════════════════════════════════════════════════════════════════
+
+/** Default signature box size as percentage of page */
+const SIG_WIDTH_PCT  = 25;
+const SIG_HEIGHT_PCT = 7;
+
+/**
+ * Create a standardized field object.
+ * All coordinates are percentages (0–100), origin top-left.
+ */
+function makeField(page, xPct, yPct, label, confidence) {
+  const clampedX = Math.max(0, Math.min(xPct, 100 - SIG_WIDTH_PCT));
+  const clampedY = Math.max(0, Math.min(yPct, 100 - SIG_HEIGHT_PCT));
+
+  return {
+    page,
+    // ── New: percentage-based (top-left origin, CSS convention) ────────────
+    xPct:      clampedX,
+    yPct:      clampedY,
+    widthPct:  SIG_WIDTH_PCT,
+    heightPct: SIG_HEIGHT_PCT,
+    label,
+    confidence,
+    // ── Legacy: absolute PDF points (for store validation & backward compat)
+    x:      (clampedX / 100) * 595,
+    y:      ((100 - clampedY - SIG_HEIGHT_PCT) / 100) * 842,  // convert top% → PDF bottom-origin
+    width:  DEFAULT_SIG_FIELD.width,
+    height: DEFAULT_SIG_FIELD.height,
+  };
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  MAIN EXPORT
+// ═════════════════════════════════════════════════════════════════════════════
+
 const detectSignatureFields = async (filePath, mimeType) => {
   try {
+    let fields;
     if (mimeType === 'application/pdf') {
-      return await _processPDF(filePath);
+      fields = await processPDF(filePath);
+    } else if (mimeType.startsWith('image/')) {
+      fields = await processImage(filePath);
+    } else {
+      fields = [];
     }
 
-    if (mimeType.startsWith('image/')) {
-      return await _processImageFile(filePath);
-    }
-
-    // DOCX / DOC — treat as two-field document for now
-    // Phase 2: use mammoth.js to extract text then run keyword scan
-    return _defaultTwoFields();
-
+    console.log(`[ocr] Final: ${fields.length} signature field(s) detected`);
+    return fields;
   } catch (err) {
-    console.error('[ocr] Detection failed, falling back to defaults:', err.message);
-    return _defaultTwoFields();
+    console.error('[ocr] Detection failed:', err.message);
+    return [];
   }
 };
 
-// ── PDF processing ─────────────────────────────────────────────────────────────
-const _processPDF = async (filePath) => {
+// ═════════════════════════════════════════════════════════════════════════════
+//  PDF PROCESSING (pdfjs-dist)
+// ═════════════════════════════════════════════════════════════════════════════
+
+async function processPDF(filePath) {
   const buffer = fs.readFileSync(filePath);
-  const data   = await pdfParse(buffer);
+  const data   = new Uint8Array(buffer);
 
-  const lines      = data.text.split('\n');
-  const pageCount  = data.numpages || 1;
-  const fields     = [];
+  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const pdf      = await pdfjsLib.getDocument({
+    data,
+    standardFontDataUrl: './node_modules/pdfjs-dist/standard_fonts/',
+  }).promise;
 
-  lines.forEach((line, lineIndex) => {
-    // Estimate which page this line falls on
-    const linesPerPage = Math.ceil(lines.length / pageCount);
-    const page         = Math.min(Math.floor(lineIndex / linesPerPage) + 1, pageCount);
+  const fields = [];
 
-    // Estimate Y position on page (PDF coordinate: 0 = bottom, PAGE_HEIGHT = top)
-    const linePositionRatio = (lineIndex % linesPerPage) / linesPerPage;
-    const y = PAGE_HEIGHT - MARGIN - linePositionRatio * (PAGE_HEIGHT - 2 * MARGIN) - DEFAULT_SIG_FIELD.height;
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+    const page    = await pdf.getPage(pageNum);
+    const content = await page.getTextContent();
+    const vp      = page.getViewport({ scale: 1 });
+    const pw      = vp.width;
+    const ph      = vp.height;
 
-    // ── Check keyword patterns ──────────────────────────────────────────────
-    for (const pattern of ALL_PATTERNS) {
-      if (pattern.regex.test(line)) {
-        fields.push({
-          page,
-          x         : MARGIN,
-          y         : Math.max(MARGIN, y),
-          width     : DEFAULT_SIG_FIELD.width,
-          height    : DEFAULT_SIG_FIELD.height,
-          confidence: pattern.confidence,
-          label     : pattern.label,
-        });
-        break; // one pattern match per line is enough
+    // Build lines by grouping items with similar Y
+    const lines = _groupIntoLines(content.items, pw, ph);
+
+    for (const line of lines) {
+      const match = classify(line.text);
+      if (match) {
+        // PDF Y is from bottom; convert to top-percentage
+        const topPct = ((ph - line.y) / ph) * 100;
+        const leftPct = (line.x / pw) * 100;
+
+        fields.push(makeField(pageNum, leftPct, topPct, match.label, match.confidence));
+        console.log(`[ocr/pdf] ✓ "${line.text}" → ${match.label} (${leftPct.toFixed(0)}%, ${topPct.toFixed(0)}%)`);
       }
     }
+  }
 
-    // ── Check underscore sequences ──────────────────────────────────────────
-    const underscoreMatches = line.match(UNDERSCORE_PATTERN);
-    if (underscoreMatches) {
-      // Don't double-add if we already added from a keyword match
-      const alreadyAdded = fields.some((f) => f.page === page && Math.abs(f.y - y) < 20);
-      if (!alreadyAdded) {
-        fields.push({
-          page,
-          x         : MARGIN + line.indexOf('_'),
-          y         : Math.max(MARGIN, y),
-          width     : Math.min(underscoreMatches[0].length * 6, PAGE_WIDTH - 2 * MARGIN),
-          height    : DEFAULT_SIG_FIELD.height,
-          confidence: OCR.CONFIDENCE.UNDERSCORE,
-          label     : 'Signature Line',
-        });
-      }
-    }
+  const result = dedup(fields);
+  return result.length > 0 ? result : await processImage(filePath);
+}
+
+/**
+ * Group PDF text items into logical lines.
+ * Items on the same Y (within 5pt tolerance) are merged.
+ * Unlike before, we DON'T merge items that are far apart horizontally
+ * (e.g., "Party A" on the left and "Party B" on the right stay separate).
+ */
+function _groupIntoLines(items, pageWidth, _pageHeight) {
+  const sorted = items.filter(i => i.str.trim()).sort((a, b) => {
+    const dy = b.transform[5] - a.transform[5]; // top to bottom
+    if (Math.abs(dy) > 5) return dy;
+    return a.transform[4] - b.transform[4]; // left to right
   });
 
-  // If no text fields detected at all, try OCR on the PDF as if it were an image
-  return fields.length > 0 ? fields : await _processImageFile(filePath);
-};
+  const lines = [];
+  let cur = null;
+
+  for (const item of sorted) {
+    const x = item.transform[4];
+    const y = item.transform[5];
+
+    if (!cur || Math.abs(cur.y - y) > 5 || (x - cur.xEnd) > pageWidth * 0.15) {
+      // Start a new line if Y differs or horizontal gap > 15% of page width
+      if (cur) lines.push(cur);
+      cur = { text: item.str, x, y, xEnd: x + (item.width || 0) };
+    } else {
+      cur.text += ' ' + item.str;
+      cur.xEnd = x + (item.width || 0);
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  IMAGE PROCESSING (Tesseract.js)
+// ═════════════════════════════════════════════════════════════════════════════
 
 const Tesseract = require('tesseract.js');
+const sharp = require('sharp');
 
-const _processImageFile = async (filePath) => {
-  try {
-    const fields = [];
-    
-    // Tesseract v7 requires a worker and explicit output options to return detailed bounding boxes
-    const worker = await Tesseract.createWorker('eng');
-    const { data } = await worker.recognize(filePath, {}, { blocks: true });
-    await worker.terminate();
-    
-    // Flatten lines from blocks -> paragraphs -> lines
-    const lines = data.blocks ? data.blocks.flatMap(b => b.paragraphs.flatMap(p => p.lines)) : [];
-    
-    // We will scan lines for our keywords.
-    for (const line of lines) {
-      if (!line || !line.text) continue;
-      const text = line.text.trim();
-      
-      for (const pattern of ALL_PATTERNS) {
-        if (pattern.regex.test(text)) {
-          // Found a match! Use the bounding box of this line.
-          // Tesseract bbox is { x0, y0, x1, y1 } where 0,0 is top-left
-          const bbox = line.bbox;
-          
-          // Convert pixel coordinates to PDF point percentages (approximate A4 aspect ratio)
-          // Since we don't know the exact image size here in terms of standard A4, 
-          // we normalize the bbox against the image dimensions.
-          const imgWidth = data.width || PAGE_WIDTH;
-          const imgHeight = data.height || PAGE_HEIGHT;
-          
-          // PDF coordinates: origin is bottom-left, but our frontend editor expects PDF coordinates 
-          // where y is from bottom (y=0 is bottom).
-          // However, the frontend calculates topPct as: (((PH - f.y - f.height) / PH) * 100)
-          // which implies f.y is distance from the bottom.
-          // Tesseract y0 is distance from the top.
-          const pdfX = (bbox.x0 / imgWidth) * PAGE_WIDTH;
-          // To get distance from bottom:
-          const distFromBottom = imgHeight - bbox.y1;
-          const pdfY = (distFromBottom / imgHeight) * PAGE_HEIGHT;
-          
-          // For width and height, we can use default size so the signature isn't tiny
-          
-          fields.push({
-            page: 1,
-            x: pdfX,
-            y: pdfY - 20, // shift slightly below the text
-            width: DEFAULT_SIG_FIELD.width,
-            height: DEFAULT_SIG_FIELD.height,
-            confidence: pattern.confidence,
-            label: pattern.label,
-          });
-          
-          break; // move to next line
-        }
+async function processImage(filePath) {
+  // Use sharp to get actual dimensions because Tesseract v7 data object
+  // doesn't reliably return width/height in its output.
+  const metadata = await sharp(filePath).metadata();
+  const imgW = metadata.width  || 595;
+  const imgH = metadata.height || 842;
+
+  const worker = await Tesseract.createWorker('eng');
+  const { data } = await worker.recognize(filePath, {}, { blocks: true });
+  await worker.terminate();
+
+  const fields = [];
+
+  console.log(`[ocr/img] Tesseract: ${imgW}×${imgH}, scanning...`);
+
+  // Flatten to words (NOT lines) so that "Signature:  Signature:" doesn't merge
+  const words = data.blocks
+    ? data.blocks.flatMap(b => b.paragraphs.flatMap(p => p.lines.flatMap(l => l.words || [])))
+    : [];
+
+  // Also get lines for line-level analysis
+  const lines = data.blocks
+    ? data.blocks.flatMap(b => b.paragraphs.flatMap(p => p.lines))
+    : [];
+
+  // ── Strategy 1: Check each LINE for primary patterns ──────────────────────
+  // But SPLIT lines at large horizontal gaps to handle side-by-side text
+  for (const line of lines) {
+    if (!line || !line.text) continue;
+    const lineWords = line.words || [];
+    if (lineWords.length === 0) continue;
+
+    // Split line into segments at large horizontal gaps (>15% of image width)
+    const segments = _splitLineIntoSegments(lineWords, imgW);
+
+    for (const seg of segments) {
+      const match = classify(seg.text);
+      if (match) {
+        const xPct = (seg.x0 / imgW) * 100;
+        const yPct = (seg.y0 / imgH) * 100;
+
+        fields.push(makeField(1, xPct, yPct + 2, match.label, match.confidence));
+        console.log(`[ocr/img] ✓ "${seg.text}" → ${match.label} at (${xPct.toFixed(0)}%, ${yPct.toFixed(0)}%)`);
       }
     }
-    
-    if (fields.length > 0) {
-      return fields;
-    }
-    
-    // If OCR found nothing, return empty array instead of dummy fields
-    return [];
-  } catch (err) {
-    console.error('[ocr] Tesseract failed:', err);
-    return [];
   }
-};
 
-// ── Default two-field fallback ─────────────────────────────────────────────────
-const _defaultTwoFields = () => [];
+  const result = dedup(fields);
+  console.log(`[ocr/img] Result: ${result.length} field(s)`);
+  return result;
+}
+
+/**
+ * Split a Tesseract line into segments when there's a large horizontal gap
+ * between words. This prevents "Party A  Party B" from being treated as one text.
+ */
+function _splitLineIntoSegments(words, imgWidth) {
+  if (words.length === 0) return [];
+
+  const GAP_THRESHOLD = imgWidth * 0.12; // 12% of page width
+  const segments = [];
+  let seg = {
+    text: words[0].text,
+    x0: words[0].bbox.x0,
+    y0: words[0].bbox.y0,
+    x1: words[0].bbox.x1,
+    y1: words[0].bbox.y1,
+  };
+
+  for (let i = 1; i < words.length; i++) {
+    const gap = words[i].bbox.x0 - seg.x1;
+    if (gap > GAP_THRESHOLD) {
+      // Large gap → start new segment
+      segments.push(seg);
+      seg = {
+        text: words[i].text,
+        x0: words[i].bbox.x0,
+        y0: words[i].bbox.y0,
+        x1: words[i].bbox.x1,
+        y1: words[i].bbox.y1,
+      };
+    } else {
+      seg.text += ' ' + words[i].text;
+      seg.x1 = words[i].bbox.x1;
+      seg.y1 = Math.max(seg.y1, words[i].bbox.y1);
+    }
+  }
+  segments.push(seg);
+  return segments;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 
 module.exports = { detectSignatureFields };
