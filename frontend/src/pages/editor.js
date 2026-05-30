@@ -28,42 +28,7 @@ export async function renderEditor(app) {
   wireAll(app, { fields, sigId, docId, docName, pages });
   
   // Restore previously saved placements or auto-place detected fields
-  if (store.placements && store.placements.length > 0) {
-    store.placements.forEach(p => {
-      const ov = app.querySelector(`#overlay-${p.page}`);
-      if (ov) {
-        const leftPct = p.leftPct !== undefined ? p.leftPct : (p.x / PW) * 100;
-        const topPct = p.topPct !== undefined ? p.topPct : (p.y / PH) * 100;
-        const widthPct = p.widthPct !== undefined ? p.widthPct : (p.width / PW) * 100;
-        const heightPct = p.heightPct !== undefined ? p.heightPct : (p.height / PH) * 100;
-        placeSig(ov, leftPct, topPct, widthPct, heightPct);
-      }
-    });
-  } else if (fields && fields.length > 0) {
-    // Auto-place signatures into detected fields
-    fields.forEach(f => {
-      const ov = app.querySelector(`#overlay-${f.page}`);
-      if (ov) {
-        let leftPct, topPct, widthPct, heightPct;
-
-        if (f.xPct !== undefined && f.yPct !== undefined) {
-          // ── New format: backend sends percentages directly (top-left origin)
-          leftPct   = f.xPct;
-          topPct    = f.yPct;
-          widthPct  = f.widthPct || 25;
-          heightPct = f.heightPct || 7;
-        } else {
-          // ── Legacy format: convert from PDF points (bottom-left origin)
-          leftPct   = (f.x / PW) * 100;
-          topPct    = ((PH - f.y - f.height) / PH) * 100;
-          widthPct  = (f.width / PW) * 100;
-          heightPct = (f.height / PH) * 100;
-        }
-
-        placeSig(ov, clamp(leftPct, 0, 95), clamp(topPct, 0, 95), Math.max(widthPct, 15), Math.max(heightPct, 5));
-      }
-    });
-  }
+  await autoPlaceFields(app, fields, store.placements || []);
 }
 
 function buildShell(docName, fields, pages, docId, isPDF) {
@@ -423,3 +388,67 @@ function toast(msg, err=false) {
   t.style.cssText = `position:fixed;bottom:24px;right:24px;background:${err?'#ef4444':'#22c55e'};color:white;padding:10px 18px;border-radius:8px;font-size:14px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.3)`;
   t.textContent = msg; document.body.appendChild(t); setTimeout(()=>t.remove(),3000);
 }
+
+async function autoPlaceFields(app, fields, savedPlacements) {
+  if (savedPlacements && savedPlacements.length > 0) {
+    savedPlacements.forEach(p => {
+      const ov = app.querySelector(`#overlay-${p.page}`);
+      if (ov) {
+        const leftPct = p.leftPct !== undefined ? p.leftPct : (p.x / PW) * 100;
+        const topPct = p.topPct !== undefined ? p.topPct : (p.y / PH) * 100;
+        const widthPct = p.widthPct !== undefined ? p.widthPct : (p.width / PW) * 100;
+        const heightPct = p.heightPct !== undefined ? p.heightPct : (p.height / PH) * 100;
+        placeSig(ov, leftPct, topPct, widthPct, heightPct);
+      }
+    });
+    return;
+  }
+
+  if (fields && fields.length > 0) {
+    // Sort by page ASC, then yPct ASC
+    const sortedFields = [...fields].sort((a, b) => {
+      if (a.page !== b.page) return a.page - b.page;
+      const yA = a.yPct !== undefined ? a.yPct : ((PH - a.y - a.height) / PH) * 100;
+      const yB = b.yPct !== undefined ? b.yPct : ((PH - b.y - b.height) / PH) * 100;
+      return yA - yB;
+    });
+
+    for (let i = 0; i < sortedFields.length; i++) {
+      const f = sortedFields[i];
+      const ov = app.querySelector(`#overlay-${f.page}`);
+      if (!ov) continue;
+
+      // Wait for overlay to become active
+      let retries = 0;
+      while (!ov.classList.contains('active') && retries < 5) {
+        await new Promise(r => setTimeout(r, 200));
+        retries++;
+      }
+      
+      if (!ov.classList.contains('active')) continue;
+
+      let leftPct, topPct, widthPct, heightPct;
+      if (f.xPct !== undefined && f.yPct !== undefined) {
+        leftPct = f.xPct;
+        topPct = f.yPct;
+        widthPct = f.widthPct || 25;
+        heightPct = f.heightPct || 12;
+      } else {
+        leftPct = (f.x / PW) * 100;
+        topPct = ((PH - f.y - f.height) / PH) * 100;
+        widthPct = (f.width / PW) * 100;
+        heightPct = (f.height / PH) * 100;
+      }
+
+      placeSig(ov, clamp(leftPct, 0, 95), clamp(topPct, 0, 95), Math.max(widthPct, 15), Math.max(heightPct, 5));
+      
+      // Staggered delay
+      await new Promise(r => setTimeout(r, 150));
+    }
+
+    updatePlacedList();
+    updateGenBtn();
+    toast(`${sortedFields.length} signature field(s) auto-detected and placed`);
+  }
+}
+

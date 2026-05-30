@@ -112,8 +112,8 @@ function dedup(fields) {
   for (const field of sorted) {
     const overlap = result.find(f =>
       f.page === field.page &&
-      Math.abs(f.yPct - field.yPct) < 4 &&
-      Math.abs(f.xPct - field.xPct) < 15
+      Math.abs(f.yPct - field.yPct) < 10 &&
+      Math.abs(f.xPct - field.xPct) < 25
     );
     if (overlap) {
       if (field.confidence > overlap.confidence) Object.assign(overlap, field);
@@ -131,7 +131,7 @@ function dedup(fields) {
 
 /** Default signature box size as percentage of page */
 const SIG_WIDTH_PCT  = 25;
-const SIG_HEIGHT_PCT = 7;
+const SIG_HEIGHT_PCT = 12;
 
 /**
  * Create a standardized field object.
@@ -302,10 +302,12 @@ async function processImage(filePath) {
     for (const seg of segments) {
       const match = classify(seg.text);
       if (match) {
-        const xPct = (seg.x0 / imgW) * 100;
-        const yPct = (seg.y0 / imgH) * 100;
+        // Shift X right by ~10% to sit after the label (e.g. "Signature: ")
+        // Shift Y up by ~4% so the signature is centered vertically on the line
+        const xPct = (seg.x0 / imgW) * 100 + 10;
+        const yPct = (seg.y0 / imgH) * 100 - 4;
 
-        fields.push(makeField(1, xPct, yPct + 2, match.label, match.confidence));
+        fields.push(makeField(1, xPct, yPct, match.label, match.confidence));
         console.log(`[ocr/img] ✓ "${seg.text}" → ${match.label} at (${xPct.toFixed(0)}%, ${yPct.toFixed(0)}%)`);
       }
     }

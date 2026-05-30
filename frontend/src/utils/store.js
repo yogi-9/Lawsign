@@ -72,14 +72,14 @@ class AppStore {
   }
 
   setDetectedFields(fields) {
-    if (!Array.isArray(fields)) {
-      throw new Error('Invalid detectedFields: must be an array');
-    }
-    // Check shape
+    if (!Array.isArray(fields)) throw new Error('Invalid detectedFields: must be an array');
     for (let i = 0; i < fields.length; i++) {
       const f = fields[i];
-      if (typeof f.page !== 'number' || typeof f.x !== 'number' || typeof f.y !== 'number' || typeof f.width !== 'number' || typeof f.height !== 'number') {
-        throw new Error('Invalid detectedFields item shape');
+      if (typeof f.page !== 'number') throw new Error(`Field ${i}: page must be a number`);
+      const hasPercentage = typeof f.xPct === 'number' && typeof f.yPct === 'number';
+      const hasAbsolute = typeof f.x === 'number' && typeof f.y === 'number';
+      if (!hasPercentage && !hasAbsolute) {
+        throw new Error(`Field ${i}: must have either (xPct,yPct) or (x,y) coordinates`);
       }
     }
     this._detectedFields = fields;

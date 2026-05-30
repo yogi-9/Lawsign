@@ -8,7 +8,7 @@ const Document   = require('../models/Document');
 const AuditLog   = require('../models/AuditLog');
 const asyncHandler  = require('../utils/asyncHandler');
 const { sendSuccess, sendError } = require('../utils/response');
-const { detectSignatureFields }  = require('../services/ocr.service');
+const { detectSignatureFields }  = require('../services/ocrDetection.service');
 const { getPDFPageCount }        = require('../services/pdf.service');
 const { deleteFile, fileExists } = require('../services/storage.service');
 const { getDocumentPageImage: renderPage } = require('../services/pageRenderer.service');
@@ -61,15 +61,36 @@ const uploadDocument = asyncHandler(async (req, res) => {
   let pageCount      = 1;
 
   try {
-    [detectedFields, pageCount] = await Promise.all([
-      detectSignatureFields(file.path, file.mimetype),
-      file.mimetype === 'application/pdf' ? getPDFPageCount(file.path) : Promise.resolve(1),
-    ]);
+    const ocrResult = await detectSignatureFields(file.path, file.mimetype);
+    detectedFields = ocrResult.fields || [];
+    
+    // For pageCount, rely on PDF service if PDF, otherwise use OCR result
+    if (file.mimetype === 'application/pdf') {
+      pageCount = await getPDFPageCount(file.path);
+    } else {
+      pageCount = ocrResult.pageCount || 1;
+    }
   } catch (e) {
     console.error('[document] OCR failed, continuing with defaults:', e.message);
   }
 
-  doc.detectedFields   = detectedFields;
+  // Python returns percentage-based fields — convert to absolute PDF points for DB storage
+  // Frontend will receive percentage-based fields directly in the API response
+  const PAGE_WIDTH_PT = 595;   // A4 width in PDF points
+  const PAGE_HEIGHT_PT = 842;  // A4 height in PDF points
+
+  const fieldsForDB = detectedFields.map(f => ({
+    page: f.page,
+    x: f.xPct !== undefined ? (f.xPct / 100) * PAGE_WIDTH_PT : f.x,
+    y: f.yPct !== undefined ? ((100 - f.yPct - (f.heightPct || 7)) / 100) * PAGE_HEIGHT_PT : f.y,
+    width: f.widthPct !== undefined ? (f.widthPct / 100) * PAGE_WIDTH_PT : f.width,
+    height: f.heightPct !== undefined ? (f.heightPct / 100) * PAGE_HEIGHT_PT : f.height,
+    confidence: f.confidence,
+    label: f.label,
+  }));
+
+  // Save fieldsForDB to DB
+  doc.detectedFields   = fieldsForDB;
   doc.pageCount        = pageCount;
   doc.processingStatus = DOC_STATUS.READY;
   await doc.save();
