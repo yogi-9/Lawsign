@@ -23,27 +23,19 @@ const _ip = (req) =>
 const generatePDF = asyncHandler(async (req, res) => {
   const { documentId, signatureId, placements: incomingPlacements } = req.body;
 
-  if (!documentId || !signatureId) {
-    return sendError(res, 400, 'documentId and signatureId are required.');
+  if (!documentId) {
+    return sendError(res, 400, 'documentId is required.');
   }
 
-  // Fetch both records
-  const [doc, sig] = await Promise.all([
-    Document.findById(documentId),
-    Signature.findById(signatureId),
-  ]);
-
+  // Fetch document
+  const doc = await Document.findById(documentId);
   if (!doc) return sendError(res, 404, 'Document not found.');
-  if (!sig) return sendError(res, 404, 'Signature not found.');
 
-  // Ownership check for both
+  // Ownership check for doc
   const userId = req.user?._id?.toString();
   const guestId = req.guestSessionId;
-
   const ownsDoc = (userId && doc.userId?.toString() === userId) || (guestId && doc.guestSessionId === guestId);
-  const ownsSig = (userId && sig.userId?.toString() === userId) || (guestId && sig.guestSessionId === guestId);
-
-  if (!ownsDoc || !ownsSig) return sendError(res, 403, 'Access denied.');
+  if (!ownsDoc) return sendError(res, 403, 'Access denied.');
 
   // Decide which placements to use
   const placements = incomingPlacements?.length > 0
@@ -54,12 +46,40 @@ const generatePDF = asyncHandler(async (req, res) => {
     return sendError(res, 400, 'No placements found. Please position your signature in the editor first.');
   }
 
-  // Verify source files exist on disk
+  // Extract all unique signatureIds from placements
+  const signatureIds = [...new Set(placements.map(p => p.signatureId).filter(Boolean))];
+
+  // Fallback to top-level signatureId if no placements had it
+  if (signatureIds.length === 0 && signatureId) {
+    signatureIds.push(signatureId);
+    // retro-fit placements with the fallback signatureId
+    placements.forEach(p => p.signatureId = signatureId);
+  }
+
+  if (signatureIds.length === 0) {
+     return sendError(res, 400, 'signatureId is required for at least one placement.');
+  }
+
+  // Fetch all signatures
+  const signatures = await Signature.find({ _id: { $in: signatureIds } });
+  if (signatures.length !== signatureIds.length) {
+    return sendError(res, 404, 'One or more signatures not found.');
+  }
+
+  // Verify ownership and existence for each signature
+  const signaturesMap = {};
+  for (const sig of signatures) {
+     const ownsSig = (userId && sig.userId?.toString() === userId) || (guestId && sig.guestSessionId === guestId);
+     if (!ownsSig) return sendError(res, 403, 'Access denied for one or more signatures.');
+     if (!fileExists(sig.processedPath)) return sendError(res, 404, `Signature image not found on server for id ${sig._id}.`);
+     signaturesMap[sig._id.toString()] = sig.processedPath;
+  }
+
+  // Verify document source file exists on disk
   if (!fileExists(doc.storagePath)) return sendError(res, 404, 'Original document file not found on server.');
-  if (!fileExists(sig.processedPath)) return sendError(res, 404, 'Signature image not found on server.');
 
   // Generate PDF
-  const result = await generateSignedPDF(doc.storagePath, sig.processedPath, placements, doc.mimeType);
+  const result = await generateSignedPDF(doc.storagePath, signaturesMap, placements, doc.mimeType);
 
   if (!result.success) {
     return sendError(res, 500, result.error);
@@ -80,7 +100,7 @@ const generatePDF = asyncHandler(async (req, res) => {
     ipAddress     : _ip(req),
     userAgent     : req.headers['user-agent'],
     metadata      : {
-      signatureId     : sig._id,
+      signatureIds    : signatureIds,
       placementCount  : placements.length,
       pages           : [...new Set(placements.map(p => p.page))],
     },

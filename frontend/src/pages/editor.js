@@ -1,15 +1,16 @@
 /* EDITOR — Canva-like free drag, move, resize signatures on real document */
 import { store } from '../utils/store.js';
-import { outputAPI, documentAPI } from '../utils/api.js';
+import { outputAPI, documentAPI, signatureAPI } from '../utils/api.js';
 
 const BASE = 'http://localhost:5000/api/v1';
 const PW = 595, PH = 842; // A4 PDF points
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let placedSigs = []; // {id, page, el, leftPct, topPct, widthPct, heightPct}
+let placedSigs = []; // {id, page, el, leftPct, topPct, widthPct, heightPct, signatureId, sigImageUrl}
 let selectedId = null;
 let sigCounter = 0;
-let sigUrl = null;
+let activeSignature = null; // Currently selected signature from gallery {id, imageUrl}
+let allSignatures = []; // All available signatures [{id, imageUrl, originalName}]
 
 export async function renderEditor(app) {
   if (!store.documentId) {
@@ -18,17 +19,17 @@ export async function renderEditor(app) {
     return;
   }
   placedSigs = []; selectedId = null; sigCounter = 0;
-  const fields = store.detectedFields, sigId = store.signatureId, docId = store.documentId;
+  const fields = store.detectedFields, docId = store.documentId;
   const docName = store.documentName || 'document.pdf', pages = store.pageCount || 1;
   const isPDF = (store.mimeType || 'application/pdf') === 'application/pdf';
-  sigUrl = store.signatureImageUrl || null;
+
+  // Load signatures from store
+  allSignatures = store.getSignatures();
+  activeSignature = allSignatures.length > 0 ? allSignatures[0] : null;
 
   app.innerHTML = buildShell(docName, fields, pages, docId, isPDF);
   await loadDocPages(app, docId, pages, isPDF);
-  wireAll(app, { fields, sigId, docId, docName, pages });
-  
-  // Restore previously saved placements or auto-place detected fields
-  await autoPlaceFields(app, fields, store.placements || []);
+  wireAll(app, { fields, docId, docName, pages });
 }
 
 function buildShell(docName, fields, pages, docId, isPDF) {
@@ -46,11 +47,16 @@ function buildShell(docName, fields, pages, docId, isPDF) {
     </div>
   </div>
   <div class="editor-sidebar-left">
-    <span class="section-label">Signature</span>
-    <div class="sig-preview-box" id="sig-src" draggable="true">
-      ${sigUrl ? `<img src="${sigUrl}" crossorigin="use-credentials" style="max-width:100%;max-height:60px">` : `<span style="font-family:cursive;font-size:1.3rem;color:#1a1a2e">Signature</span>`}
+    <span class="section-label">Signatures</span>
+    <div class="sig-gallery-grid" id="sig-gallery-grid">
+      ${buildSigGallery()}
     </div>
-    <p class="sig-preview-hint">Drag onto document or click on page to add manually</p>
+    <button class="sig-add-btn" id="sig-add-btn">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      Add Signature
+    </button>
+    <input type="file" id="editor-sig-input" accept=".jpg,.jpeg,.png,.webp" style="display:none" multiple>
+    <p class="sig-preview-hint">Select a signature above, then drag onto document or click on page to place</p>
   </div>
   <div class="editor-canvas" id="editor-canvas">${buildPages(fields, pages)}</div>
   <div class="editor-sidebar-right">
@@ -68,10 +74,22 @@ function buildShell(docName, fields, pages, docId, isPDF) {
 </div>`;
 }
 
+function buildSigGallery() {
+  if (!allSignatures.length) {
+    return `<p style="font-size:var(--text-xs);color:var(--text-3);text-align:center;padding:var(--space-4)">No signatures uploaded yet</p>`;
+  }
+  return allSignatures.map(sig => {
+    const isActive = activeSignature && activeSignature.id === sig.id;
+    return `<div class="sig-gallery-card ${isActive ? 'active' : ''}" data-sig-id="${sig.id}" draggable="true">
+      <img src="${sig.imageUrl}" crossorigin="use-credentials" alt="${sig.originalName || 'Signature'}">
+      <div class="sig-gallery-card-label">${sig.originalName ? sig.originalName.replace(/\.[^/.]+$/, '').slice(0, 12) : 'Signature'}</div>
+    </div>`;
+  }).join('');
+}
+
 function buildPages(fields, pages) {
   let h = '';
   for (let p = 1; p <= pages; p++) {
-    const pf = fields.filter(f=>f.page===p);
     h += `<div class="doc-page" data-page="${p}">
       <div class="doc-page-content" id="pc-${p}" style="min-height:400px;display:flex;align-items:center;justify-content:center">
         <div style="color:var(--text-3);font-size:var(--text-sm);display:flex;flex-direction:column;align-items:center;gap:8px">
@@ -131,7 +149,14 @@ function renderImg(c, url) {
 }
 
 // ── Place a signature on a page ──────────────────────────────────────────────
-function placeSig(overlay, leftPct, topPct, widthPct, savedHeightPct = null) {
+function placeSig(overlay, leftPct, topPct, widthPct, savedHeightPct = null, sigInfo = null) {
+  // Use provided sigInfo or the currently active signature
+  const sig = sigInfo || activeSignature;
+  if (!sig) {
+    toast('Please select a signature first', true);
+    return;
+  }
+
   const id = ++sigCounter;
   const page = parseInt(overlay.dataset.page);
   const hPct = savedHeightPct !== null ? savedHeightPct : (widthPct * 0.35); // aspect ratio approx
@@ -139,14 +164,18 @@ function placeSig(overlay, leftPct, topPct, widthPct, savedHeightPct = null) {
   wrap.className = 'placed-sig-wrap';
   wrap.dataset.sigId = id;
   wrap.style.cssText = `left:${leftPct}%;top:${topPct}%;width:${widthPct}%;height:${hPct}%;`;
-  wrap.innerHTML = `${sigUrl ? `<img src="${sigUrl}" crossorigin="use-credentials">` : `<span class="sig-text">Signature</span>`}
+  wrap.innerHTML = `${sig.imageUrl ? `<img src="${sig.imageUrl}" crossorigin="use-credentials">` : `<span class="sig-text">Signature</span>`}
     <div class="resize-handle nw"></div><div class="resize-handle ne"></div>
     <div class="resize-handle sw"></div><div class="resize-handle se"></div>
     <div class="sig-delete-btn">✕</div>`;
   overlay.appendChild(wrap);
   wrap.style.animation = 'signaturePlace 0.25s ease-out';
 
-  const rec = { id, page, el: wrap, leftPct, topPct, widthPct, heightPct: hPct };
+  const rec = {
+    id, page, el: wrap, leftPct, topPct, widthPct, heightPct: hPct,
+    signatureId: sig.id,
+    sigImageUrl: sig.imageUrl,
+  };
   placedSigs.push(rec);
   selectSig(id);
   setupDrag(wrap, rec, overlay);
@@ -238,9 +267,17 @@ function updatePlacedList() {
   const list = document.querySelector('#placed-list');
   if (!list) return;
   if (!placedSigs.length) { list.innerHTML = '<p style="font-size:var(--text-xs);color:var(--text-3)">None yet</p>'; return; }
-  list.innerHTML = placedSigs.map(s => `<div class="placed-row ${s.id===selectedId?'active':''}" data-sig-id="${s.id}">
-    <div class="placed-row-info"><span class="placed-row-label">Signature #${s.id}</span><span class="placed-row-page">Page ${s.page}</span></div>
-    <span class="del-btn" data-del="${s.id}">✕</span></div>`).join('');
+  list.innerHTML = placedSigs.map(s => {
+    // Find signature name
+    const sigData = allSignatures.find(sig => sig.id === s.signatureId);
+    const sigLabel = sigData ? (sigData.originalName || 'Signature').replace(/\.[^/.]+$/, '').slice(0, 15) : 'Signature';
+    return `<div class="placed-row ${s.id===selectedId?'active':''}" data-sig-id="${s.id}">
+    <div class="placed-row-info">
+      <span class="placed-row-label">${sigLabel} #${s.id}</span>
+      <span class="placed-row-page">Page ${s.page}</span>
+    </div>
+    <span class="del-btn" data-del="${s.id}">✕</span></div>`;
+  }).join('');
   list.querySelectorAll('.placed-row').forEach(r => r.addEventListener('click', () => selectSig(+r.dataset.sigId)));
   list.querySelectorAll('.del-btn').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); removeSig(+e.target.dataset.del); }));
 }
@@ -250,7 +287,7 @@ function updateGenBtn() {
   if (btn) { btn.disabled = placedSigs.length === 0; btn.classList.toggle('disabled', !placedSigs.length); }
 }
 
-function buildPlacements(sigId) {
+function buildPlacements() {
   return placedSigs.map(s => ({
     page: s.page,
     x: (s.leftPct / 100) * PW,
@@ -262,22 +299,86 @@ function buildPlacements(sigId) {
     widthPct: s.widthPct,
     heightPct: s.heightPct,
     rotation: 0,
-    signatureId: sigId || store.signatureId, // fallback to store if sigId is null
+    signatureId: s.signatureId,
   }));
 }
 
 // ── Wire everything ──────────────────────────────────────────────────────────
-function wireAll(app, { fields, sigId, docId, docName, pages }) {
+function wireAll(app, { fields, docId, docName, pages }) {
   // Zoom
   let zoom = 100;
   const cv = app.querySelector('#editor-canvas');
   app.querySelector('#btn-zoom-in')?.addEventListener('click', () => { zoom = Math.min(zoom+10,200); cv.style.zoom=zoom/100; app.querySelector('#zoom-label').textContent=zoom+'%'; });
   app.querySelector('#btn-zoom-out')?.addEventListener('click', () => { zoom = Math.max(zoom-10,50); cv.style.zoom=zoom/100; app.querySelector('#zoom-label').textContent=zoom+'%'; });
 
-
-
   // Toggles
   app.querySelectorAll('.toggle').forEach(t => t.addEventListener('click', () => t.classList.toggle('active')));
+
+  // ── Signature gallery — click to select active signature ─────────────────
+  function wireSigGallery() {
+    const grid = app.querySelector('#sig-gallery-grid');
+    if (!grid) return;
+    grid.querySelectorAll('.sig-gallery-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const sigId = card.dataset.sigId;
+        activeSignature = allSignatures.find(s => s.id === sigId) || null;
+        // Update active state visually
+        grid.querySelectorAll('.sig-gallery-card').forEach(c => c.classList.remove('active'));
+        card.classList.add('active');
+      });
+
+      // Drag from gallery card
+      card.addEventListener('dragstart', e => {
+        e.dataTransfer.setData('text/plain', card.dataset.sigId);
+        cv.classList.add('drag-over-canvas');
+      });
+      card.addEventListener('dragend', () => cv.classList.remove('drag-over-canvas'));
+    });
+  }
+  wireSigGallery();
+
+  // ── Add Signature button ─────────────────────────────────────────────────
+  const addBtn = app.querySelector('#sig-add-btn');
+  const editorSigInput = app.querySelector('#editor-sig-input');
+  if (addBtn && editorSigInput) {
+    addBtn.addEventListener('click', () => editorSigInput.click());
+    editorSigInput.addEventListener('change', async e => {
+      const files = Array.from(e.target.files);
+      if (!files.length) return;
+      editorSigInput.value = '';
+
+      // Show uploading state
+      addBtn.classList.add('sig-uploading');
+      addBtn.textContent = 'Uploading...';
+
+      try {
+        for (const file of files) {
+          const result = await signatureAPI.upload(file);
+          const newSig = {
+            id: result.signatureId,
+            imageUrl: result.imageUrl,
+            originalName: result.originalName || file.name,
+          };
+          allSignatures.push(newSig);
+          store.addSignature(newSig);
+          activeSignature = newSig;
+        }
+
+        // Re-render gallery
+        const grid = app.querySelector('#sig-gallery-grid');
+        if (grid) {
+          grid.innerHTML = buildSigGallery();
+          wireSigGallery();
+        }
+        toast(`${files.length} signature(s) added ✓`);
+      } catch (err) {
+        toast('Failed to upload signature: ' + err.message, true);
+      } finally {
+        addBtn.classList.remove('sig-uploading');
+        addBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add Signature`;
+      }
+    });
+  }
 
   // Click on overlay to place signature
   app.querySelectorAll('.sig-overlay').forEach(ov => {
@@ -290,20 +391,15 @@ function wireAll(app, { fields, sigId, docId, docName, pages }) {
     });
   });
 
-
-
-  // Drag from sidebar
-  const sigSrc = app.querySelector('#sig-src');
-  if (sigSrc) {
-    sigSrc.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain','sig'); cv.classList.add('drag-over-canvas'); });
-    sigSrc.addEventListener('dragend', () => cv.classList.remove('drag-over-canvas'));
-  }
+  // Drag from sidebar gallery cards onto overlays
   app.querySelectorAll('.sig-overlay').forEach(ov => {
     ov.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect='copy'; });
     ov.addEventListener('drop', e => {
       e.preventDefault(); cv.classList.remove('drag-over-canvas');
+      const draggedSigId = e.dataTransfer.getData('text/plain');
+      const draggedSig = allSignatures.find(s => s.id === draggedSigId);
       const r = ov.getBoundingClientRect();
-      placeSig(ov, clamp((e.clientX-r.left)/r.width*100-12,0,75), clamp((e.clientY-r.top)/r.height*100-4,0,90), 25);
+      placeSig(ov, clamp((e.clientX-r.left)/r.width*100-12,0,75), clamp((e.clientY-r.top)/r.height*100-4,0,90), 25, null, draggedSig);
     });
   });
 
@@ -316,7 +412,7 @@ function wireAll(app, { fields, sigId, docId, docName, pages }) {
   // Save
   app.querySelector('#btn-save')?.addEventListener('click', async () => {
     try { 
-      await documentAPI.savePlacements(docId, buildPlacements(sigId)); 
+      await documentAPI.savePlacements(docId, buildPlacements()); 
       toast('Placements saved ✓'); 
     } catch(e) { 
       toast('Save failed: '+e.message, true); 
@@ -325,7 +421,7 @@ function wireAll(app, { fields, sigId, docId, docName, pages }) {
 
   // Generate buttons
   [app.querySelector('#btn-gen'), app.querySelector('#btn-gen-top')].forEach(b => {
-    if (b) b.addEventListener('click', () => { if (placedSigs.length) showModal(app, {docId, sigId, docName, fields}); });
+    if (b) b.addEventListener('click', () => { if (placedSigs.length) showModal(app, {docId, docName, fields}); });
   });
 
   updateGenBtn();
@@ -334,7 +430,7 @@ function wireAll(app, { fields, sigId, docId, docName, pages }) {
 // ── Processing modal ─────────────────────────────────────────────────────────
 const STEPS = ['Validating','Rendering signatures','Compositing pages','Generating PDF','Creating audit trail','Uploading','Generating link'];
 
-async function showModal(app, {docId, sigId, docName, fields}) {
+async function showModal(app, {docId, docName, fields}) {
   const ov = app.querySelector('#editor-modal'), mc = app.querySelector('#modal-content');
   ov.classList.add('active');
   mc.innerHTML = `<div class="progress-circle"><svg width="140" height="140" viewBox="0 0 140 140">
@@ -352,8 +448,8 @@ async function showModal(app, {docId, sigId, docName, fields}) {
   const iv = setInterval(()=>{ if(si>0){steps[si-1].querySelector('.dot').classList.replace('active','done');} if(si<STEPS.length-2){steps[si].querySelector('.dot').classList.add('active');const p=Math.round((si+1)/STEPS.length*100);ring.style.strokeDashoffset=377-377*(si+1)/STEPS.length;pp.textContent=p+'%';ms.textContent=STEPS[si]+'...';si++;}else clearInterval(iv);},700);
 
   try {
-    const placements = buildPlacements(sigId);
-    const result = await outputAPI.generate(docId, sigId, placements);
+    const placements = buildPlacements();
+    const result = await outputAPI.generate(docId, placements);
     clearInterval(iv);
     while(si<STEPS.length){steps[si].querySelector('.dot').classList.add('done');si++;} ring.style.strokeDashoffset=0; pp.textContent='100%';
     store.setOutputDocumentId(docId);
@@ -369,13 +465,16 @@ async function showModal(app, {docId, sigId, docName, fields}) {
 
 function showDone(mc,{docName,fields,downloadUrl}) {
   const now = new Date().toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  // Count unique signatures used
+  const uniqueSigs = new Set(placedSigs.map(s => s.signatureId)).size;
   mc.innerHTML = `<div class="download-state">
     <div class="success-circle"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg></div>
     <h2 style="font-size:var(--text-2xl);font-weight:bold;color:var(--text-1)">Document Signed Successfully</h2>
     <div class="doc-summary">
       <div><div class="sum-label">Document</div><div class="sum-value">${docName}</div></div>
       <div><div class="sum-label">Pages</div><div class="sum-value">${store.pageCount}</div></div>
-      <div><div class="sum-label">Signatures</div><div class="sum-value">${placedSigs.length}</div></div>
+      <div><div class="sum-label">Placements</div><div class="sum-value">${placedSigs.length}</div></div>
+      <div><div class="sum-label">Signatures</div><div class="sum-value">${uniqueSigs}</div></div>
       <div><div class="sum-label">Signed</div><div class="sum-value">${now}</div></div>
     </div>
     <a href="${downloadUrl}" download="signed-${docName.replace(/\.[^/.]+$/, '')}.pdf" class="btn btn-primary btn-full btn-lg" style="margin-top:var(--space-4);text-align:center;text-decoration:none">⬇ Download Signed PDF</a>
@@ -388,67 +487,3 @@ function toast(msg, err=false) {
   t.style.cssText = `position:fixed;bottom:24px;right:24px;background:${err?'#ef4444':'#22c55e'};color:white;padding:10px 18px;border-radius:8px;font-size:14px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.3)`;
   t.textContent = msg; document.body.appendChild(t); setTimeout(()=>t.remove(),3000);
 }
-
-async function autoPlaceFields(app, fields, savedPlacements) {
-  if (savedPlacements && savedPlacements.length > 0) {
-    savedPlacements.forEach(p => {
-      const ov = app.querySelector(`#overlay-${p.page}`);
-      if (ov) {
-        const leftPct = p.leftPct !== undefined ? p.leftPct : (p.x / PW) * 100;
-        const topPct = p.topPct !== undefined ? p.topPct : (p.y / PH) * 100;
-        const widthPct = p.widthPct !== undefined ? p.widthPct : (p.width / PW) * 100;
-        const heightPct = p.heightPct !== undefined ? p.heightPct : (p.height / PH) * 100;
-        placeSig(ov, leftPct, topPct, widthPct, heightPct);
-      }
-    });
-    return;
-  }
-
-  if (fields && fields.length > 0) {
-    // Sort by page ASC, then yPct ASC
-    const sortedFields = [...fields].sort((a, b) => {
-      if (a.page !== b.page) return a.page - b.page;
-      const yA = a.yPct !== undefined ? a.yPct : ((PH - a.y - a.height) / PH) * 100;
-      const yB = b.yPct !== undefined ? b.yPct : ((PH - b.y - b.height) / PH) * 100;
-      return yA - yB;
-    });
-
-    for (let i = 0; i < sortedFields.length; i++) {
-      const f = sortedFields[i];
-      const ov = app.querySelector(`#overlay-${f.page}`);
-      if (!ov) continue;
-
-      // Wait for overlay to become active
-      let retries = 0;
-      while (!ov.classList.contains('active') && retries < 5) {
-        await new Promise(r => setTimeout(r, 200));
-        retries++;
-      }
-      
-      if (!ov.classList.contains('active')) continue;
-
-      let leftPct, topPct, widthPct, heightPct;
-      if (f.xPct !== undefined && f.yPct !== undefined) {
-        leftPct = f.xPct;
-        topPct = f.yPct;
-        widthPct = f.widthPct || 25;
-        heightPct = f.heightPct || 12;
-      } else {
-        leftPct = (f.x / PW) * 100;
-        topPct = ((PH - f.y - f.height) / PH) * 100;
-        widthPct = (f.width / PW) * 100;
-        heightPct = (f.height / PH) * 100;
-      }
-
-      placeSig(ov, clamp(leftPct, 0, 95), clamp(topPct, 0, 95), Math.max(widthPct, 15), Math.max(heightPct, 5));
-      
-      // Staggered delay
-      await new Promise(r => setTimeout(r, 150));
-    }
-
-    updatePlacedList();
-    updateGenBtn();
-    toast(`${sortedFields.length} signature field(s) auto-detected and placed`);
-  }
-}
-

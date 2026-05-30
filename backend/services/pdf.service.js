@@ -23,12 +23,12 @@ const { ensureDir } = require('./storage.service');
  * Generate a signed PDF by embedding signature images at specified placements.
  *
  * @param {string} documentPath  - Absolute path to the original PDF
- * @param {string} signaturePath - Absolute path to the processed signature PNG
- * @param {Array}  placements    - Array of { page, x, y, width, height, rotation }
+ * @param {Object} signaturesMap - Map of { signatureId: absolute_path_to_processed_png }
+ * @param {Array}  placements    - Array of { page, x, y, width, height, rotation, signatureId }
  * @param {string} mimeType      - MIME type of the original document
  * @returns {Promise<{ success: true, outputPath: string } | { success: false, error: string }>}
  */
-const generateSignedPDF = async (documentPath, signaturePath, placements, mimeType = 'application/pdf') => {
+const generateSignedPDF = async (documentPath, signaturesMap, placements, mimeType = 'application/pdf') => {
   try {
     // ── 1. Load original document (PDF or Image) ──────────────────────────────
     let pdfDoc;
@@ -54,9 +54,12 @@ const generateSignedPDF = async (documentPath, signaturePath, placements, mimeTy
       throw new Error(`Document type ${mimeType} cannot be converted to PDF.`);
     }
 
-    // ── 2. Load and embed signature PNG ──────────────────────────────────────
-    const sigBytes  = fs.readFileSync(signaturePath);
-    const sigImage  = await pdfDoc.embedPng(sigBytes);
+    // ── 2. Cache Embedded Signatures ─────────────────────────────────────────
+    const embeddedSigs = {}; // { signatureId: PDFImage }
+    for (const [sigId, sigPath] of Object.entries(signaturesMap)) {
+      const sigBytes = fs.readFileSync(sigPath);
+      embeddedSigs[sigId] = await pdfDoc.embedPng(sigBytes);
+    }
 
     // ── 3. Draw signature on each placement ──────────────────────────────────
     for (const placement of placements) {
@@ -69,6 +72,13 @@ const generateSignedPDF = async (documentPath, signaturePath, placements, mimeTy
 
       const page       = pdfDoc.getPages()[pageIndex];
       const { width: pageWidth, height: pageHeight } = page.getSize();
+
+      // Look up the embedded signature image for this placement
+      const sigImage = embeddedSigs[placement.signatureId];
+      if (!sigImage) {
+         console.warn(`[pdf] Placement uses signatureId ${placement.signatureId} which was not found in signaturesMap. Skipping.`);
+         continue;
+      }
 
       // ── Coordinate conversion ─────────────────────────────────────────────
       // Editor sends percentages or absolute values

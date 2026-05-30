@@ -25,6 +25,84 @@
 .upload-file-remove:hover { color:var(--color-error); }
 .upload-proceed { display:flex;justify-content:center;margin-top:var(--space-10); }
 .upload-security-note { text-align:center;margin-top:var(--space-6);font-size:var(--text-xs);color:var(--text-3);max-width:500px;margin-left:auto;margin-right:auto; }
+
+/* ── Multi-signature gallery (inside sig upload zone) ────────────────────── */
+.upload-zone-sig.has-file { cursor:default;padding:var(--space-6); }
+.sig-gallery {
+  display:grid;
+  grid-template-columns:repeat(auto-fill, minmax(100px, 1fr));
+  gap:var(--space-3);
+  width:100%;
+}
+.sig-thumb {
+  position:relative;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:var(--space-1);
+  padding:var(--space-3) var(--space-2) var(--space-2);
+  border-radius:var(--radius-md);
+  background:var(--bg);
+  border:1px solid var(--border-1);
+  transition:all var(--duration-fast);
+  animation:sigThumbIn 0.25s ease-out;
+}
+.sig-thumb:hover { border-color:var(--accent-indigo);box-shadow:0 2px 8px rgba(99,102,241,0.12); }
+.sig-thumb-img-wrap {
+  width:80px;
+  height:50px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:var(--radius-sm);
+  overflow:hidden;
+  /* Transparency checkerboard */
+  background-image:linear-gradient(45deg,var(--bg-3) 25%,transparent 25%),linear-gradient(-45deg,var(--bg-3) 25%,transparent 25%),linear-gradient(45deg,transparent 75%,var(--bg-3) 75%),linear-gradient(-45deg,transparent 75%,var(--bg-3) 75%);
+  background-size:10px 10px;
+  background-position:0 0,0 5px,5px -5px,-5px 0;
+}
+.sig-thumb-img-wrap img { max-width:100%;max-height:100%;object-fit:contain; }
+.sig-thumb-name { font-family:var(--font-mono);font-size:10px;color:var(--text-2);max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.sig-thumb-size { font-size:9px;color:var(--text-3); }
+.sig-thumb-remove {
+  position:absolute;
+  top:-6px;
+  right:-6px;
+  width:20px;height:20px;
+  border-radius:50%;
+  background:#ef4444;
+  color:white;
+  font-size:11px;
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;
+  border:2px solid var(--bg);
+  opacity:0;
+  transition:opacity var(--duration-fast),transform var(--duration-fast);
+  z-index:2;
+  line-height:1;
+}
+.sig-thumb:hover .sig-thumb-remove { opacity:1; }
+.sig-thumb-remove:hover { transform:scale(1.15);background:#dc2626; }
+
+.sig-add-more-btn {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:var(--space-2);
+  padding:var(--space-2) var(--space-4);
+  border-radius:var(--radius-md);
+  background:transparent;
+  border:1px dashed var(--border-2);
+  color:var(--text-2);
+  font-size:var(--text-sm);
+  cursor:pointer;
+  transition:all var(--duration-fast);
+  margin-top:var(--space-2);
+}
+.sig-add-more-btn:hover { border-color:var(--accent-indigo);color:var(--accent-indigo);background:var(--accent-indigo-tint); }
+
+@keyframes sigThumbIn { from { transform:scale(0.85);opacity:0; } to { transform:scale(1);opacity:1; } }
+
 /* Processing overlay */
 .processing-overlay { position:fixed;inset:0;z-index:var(--z-modal);display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,0.4);backdrop-filter:blur(4px);opacity:0;pointer-events:none;transition:opacity var(--duration-medium); }
 .processing-overlay.active { opacity:1;pointer-events:auto; }

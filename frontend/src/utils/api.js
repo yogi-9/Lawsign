@@ -134,8 +134,8 @@ export const signatureAPI = {
 
 // ── Output ────────────────────────────────────────────────────────────────────
 export const outputAPI = {
-  generate   : (documentId, signatureId, placements) =>
-    _req('POST', '/output/generate', { documentId, signatureId, placements }),
+  generate   : (documentId, placements) =>
+    _req('POST', '/output/generate', { documentId, placements }),
   downloadUrl: (documentId) => `${BASE}/output/download/${documentId}`,
   status     : (documentId) => _req('GET', `/output/status/${documentId}`),
 };
