@@ -248,7 +248,7 @@ async function startServer() {
   // ── 18. Start listening ───────────────────────────────────────────────────────
   const PORT = parseInt(process.env.PORT, 10) || 5000;
 
-  server.listen(PORT, () => {
+  server.listen(PORT, '0.0.0.0', () => {
     const env = process.env.NODE_ENV || 'development';
     console.log('\n╔══════════════════════════════════════════════╗');
     console.log('║        🖋  LawSign Backend API  v1.0          ║');
