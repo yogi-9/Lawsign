@@ -3,7 +3,14 @@ import { store } from '../utils/store.js';
 import { outputAPI, documentAPI, signatureAPI } from '../utils/api.js';
 
 const BASE = import.meta.env.VITE_API_URL || '/api/v1';
+const BACKEND_ORIGIN = BASE.replace(/\/api\/v1$/, '');
 const PW = 595, PH = 842; // A4 PDF points
+
+function toFullImageUrl(url) {
+  if (!url) return url;
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:')) return url;
+  return BACKEND_ORIGIN + url;
+}
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let placedSigs = []; // {id, page, el, leftPct, topPct, widthPct, heightPct, signatureId, sigImageUrl}
@@ -81,7 +88,7 @@ function buildSigGallery() {
   return allSignatures.map(sig => {
     const isActive = activeSignature && activeSignature.id === sig.id;
     return `<div class="sig-gallery-card ${isActive ? 'active' : ''}" data-sig-id="${sig.id}" draggable="true">
-      <img src="${sig.imageUrl}" crossorigin="use-credentials" alt="${sig.originalName || 'Signature'}">
+      <img src="${toFullImageUrl(sig.imageUrl)}" crossorigin="use-credentials" alt="${sig.originalName || 'Signature'}">
       <div class="sig-gallery-card-label">${sig.originalName ? sig.originalName.replace(/\.[^/.]+$/, '').slice(0, 12) : 'Signature'}</div>
     </div>`;
   }).join('');
@@ -139,12 +146,20 @@ async function renderPDF(c, url) {
 }
 
 function renderImg(c, url) {
-  return new Promise((ok, fail) => {
-    const img = new Image(); img.crossOrigin = 'use-credentials';
-    img.style.cssText = 'width:100%;height:auto;display:block';
-    img.onload = () => { c.innerHTML=''; c.style.minHeight='auto'; c.appendChild(img); ok(); };
-    img.onerror = () => fail(new Error('Image load failed'));
-    img.src = url;
+  return new Promise(async (ok, fail) => {
+    try {
+      const res = await fetch(url, { credentials: 'include' });
+      if (!res.ok) return fail(new Error(`HTTP ${res.status}`));
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const img = new Image();
+      img.style.cssText = 'width:100%;height:auto;display:block';
+      img.onload = () => { c.innerHTML=''; c.style.minHeight='auto'; c.appendChild(img); ok(); };
+      img.onerror = () => fail(new Error('Image load failed'));
+      img.src = blobUrl;
+    } catch (e) {
+      fail(e);
+    }
   });
 }
 
@@ -164,7 +179,7 @@ function placeSig(overlay, leftPct, topPct, widthPct, savedHeightPct = null, sig
   wrap.className = 'placed-sig-wrap';
   wrap.dataset.sigId = id;
   wrap.style.cssText = `left:${leftPct}%;top:${topPct}%;width:${widthPct}%;height:${hPct}%;`;
-  wrap.innerHTML = `${sig.imageUrl ? `<img src="${sig.imageUrl}" crossorigin="use-credentials">` : `<span class="sig-text">Signature</span>`}
+  wrap.innerHTML = `${sig.imageUrl ? `<img src="${toFullImageUrl(sig.imageUrl)}">` : `<span class="sig-text">Signature</span>`}
     <div class="resize-handle nw"></div><div class="resize-handle ne"></div>
     <div class="resize-handle sw"></div><div class="resize-handle se"></div>
     <div class="sig-delete-btn">✕</div>`;
@@ -356,7 +371,7 @@ function wireAll(app, { fields, docId, docName, pages }) {
           const result = await signatureAPI.upload(file);
           const newSig = {
             id: result.signatureId,
-            imageUrl: result.imageUrl,
+            imageUrl: toFullImageUrl(result.imageUrl),
             originalName: result.originalName || file.name,
           };
           allSignatures.push(newSig);

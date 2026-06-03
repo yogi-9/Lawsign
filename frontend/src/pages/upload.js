@@ -2,6 +2,18 @@ import { createNavbar } from '../components/navbar.js';
 import { documentAPI, signatureAPI, authAPI } from '../utils/api.js';
 import { store } from '../utils/store.js';
 
+const API_BASE = import.meta.env.VITE_API_URL || '/api/v1';
+// Get the backend origin (e.g. https://lawsign.onrender.com) from the API URL
+const BACKEND_ORIGIN = API_BASE.replace(/\/api\/v1$/, '');
+
+function toFullImageUrl(url) {
+  if (!url) return url;
+  // If already absolute, return as-is
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  // Prepend backend origin to relative paths
+  return BACKEND_ORIGIN + url;
+}
+
 const checkSvg = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg>`;
 
 const STEPS = [
@@ -318,7 +330,7 @@ export function renderUpload(app) {
       for (const sigResult of sigResults) {
         store.addSignature({
           id: sigResult.signatureId,
-          imageUrl: sigResult.imageUrl,
+          imageUrl: toFullImageUrl(sigResult.imageUrl),
           originalName: sigResult.originalName || 'signature.png',
         });
       }
