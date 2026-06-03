@@ -14,8 +14,9 @@
     "db:backup": "node scripts/db-backup.js",
     "db:restore": "node scripts/db-restore.js",
     "python:bg": "cd python && python3 bg_remover.py",
-    "dev:full": "concurrently \"npm run dev\" \"npm run python:bg\"",
-    "start:full": "concurrently \"npm start\" \"npm run python:bg\""
+    "python:ocr": "cd python && python3 ocr_service.py",
+    "dev:full": "concurrently \"npm run dev\" \"npm run python:bg\" \"npm run python:ocr\"",
+    "start:full": "concurrently \"npm start\" \"npm run python:bg\" \"npm run python:ocr\""
   },
   "keywords": [
     "lawsign",

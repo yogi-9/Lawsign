@@ -25,8 +25,8 @@ RUN npm install
 
 # Copy Python requirements and install
 COPY python/requirements.txt ./python/
-RUN pip3 install --no-cache-dir -r python/requirements.txt --break-system-packages
-RUN pip3 install --no-cache-dir -r python/requirements_ocr.txt --break-system-packages || true
+RUN pip3 install --no-cache-dir -r python/requirements.txt
+RUN pip3 install --no-cache-dir -r python/requirements_ocr.txt || true
 
 # Copy all other backend files
 COPY . .
