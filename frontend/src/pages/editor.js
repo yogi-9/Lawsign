@@ -2,7 +2,7 @@
 import { store } from '../utils/store.js';
 import { outputAPI, documentAPI, signatureAPI } from '../utils/api.js';
 
-const BASE = 'http://localhost:5000/api/v1';
+const BASE = import.meta.env.VITE_API_URL || '/api/v1';
 const PW = 595, PH = 842; // A4 PDF points
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -453,7 +453,7 @@ async function showModal(app, {docId, docName, fields}) {
     clearInterval(iv);
     while(si<STEPS.length){steps[si].querySelector('.dot').classList.add('done');si++;} ring.style.strokeDashoffset=0; pp.textContent='100%';
     store.setOutputDocumentId(docId);
-    setTimeout(()=>showDone(mc,{docName,fields,downloadUrl:`http://localhost:5000${result.downloadUrl}`}),600);
+    setTimeout(()=>showDone(mc,{docName,fields,downloadUrl:`${BASE.replace('/api/v1', '')}${result.downloadUrl}`}),600);
   } catch(err) {
     clearInterval(iv);
     mc.innerHTML = `<div style="text-align:center;padding:40px"><div style="font-size:48px;margin-bottom:16px">⚠️</div>

@@ -292,7 +292,7 @@ export function renderUpload(app) {
           }
         } else {
           // Network error or server error — surface it clearly
-          throw new Error('Cannot connect to LawSign server. Make sure the backend is running on port 5000.');
+          throw new Error('Cannot connect to LawSign server.');
         }
       }
 
@@ -347,7 +347,7 @@ export function renderUpload(app) {
         s.querySelector('.step-status').innerHTML = '';
         s.querySelector('.step-text').classList.remove('active','done');
       });
-      showError(`Upload failed: ${err.message}. Make sure the backend is running on port 5000.`);
+      showError(`Upload failed: ${err.message}`);
     }
   });
 }
