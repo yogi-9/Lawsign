@@ -8,7 +8,7 @@
 const crypto = require('crypto');
 
 const SECRET = process.env.SIGNATURE_SECRET || 'lawsign-dev-signature-secret-key-123';
-const TOKEN_EXPIRY_MS = 60 * 60 * 1000; // 1 hour
+const TOKEN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days (matches JWT session lifetime)
 
 /**
  * Generates a signed token for a given signature ID.
