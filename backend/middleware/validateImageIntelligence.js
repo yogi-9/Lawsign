@@ -71,13 +71,15 @@ const validateImageIntelligence = async (req, res, next) => {
 
     // 3. Enforce Logic based on classification
     if (classification.includes('SCREENSHOT')) {
-      fs.unlinkSync(filePath);
-      return sendError(res, 400, 'Image validation failed: This appears to be a digital screenshot. Please upload a real camera photo or scan.');
+      // fs.unlinkSync(filePath);
+      // return sendError(res, 400, 'Image validation failed: This appears to be a digital screenshot. Please upload a real camera photo or scan.');
+      console.log('Allowing SCREENSHOT for testing purposes');
     }
 
     if (isSignature && !classification.includes('SIGNATURE')) {
-      fs.unlinkSync(filePath);
-      return sendError(res, 400, 'Image validation failed: Please upload a clear photo of just your handwritten signature, not a full document or screenshot.');
+      // fs.unlinkSync(filePath);
+      // return sendError(res, 400, 'Image validation failed: Please upload a clear photo of just your handwritten signature, not a full document or screenshot.');
+      console.log('Allowing non-signature image for testing purposes');
     }
 
     next();

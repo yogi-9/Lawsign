@@ -17,7 +17,7 @@ class APIError extends Error {
 const _req = async (method, path, body, isFormData = false, retries = 1) => {
   const url = `${BASE}${path}`;
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+  const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s timeout
 
   const opts = {
     method,
@@ -75,7 +75,7 @@ const _req = async (method, path, body, isFormData = false, retries = 1) => {
     clearTimeout(timeoutId);
     
     if (err.name === 'AbortError') {
-      throw new APIError('Request timed out after 30 seconds', 408);
+      throw new APIError('Request timed out after 90 seconds', 408);
     }
     
     // If it's a network error (TypeError: Failed to fetch)
