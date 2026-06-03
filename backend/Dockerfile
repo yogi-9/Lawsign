@@ -36,4 +36,6 @@ EXPOSE 5000
 
 # Start the application (you may need to run python:bg and start separately as per your package.json, 
 # or use dev:full. For production, usually a process manager like pm2 or concurrently is used).
-CMD ["npm", "run", "start:full"]
+COPY start.sh .
+RUN chmod +x start.sh
+CMD ["./start.sh"]
