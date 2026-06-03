@@ -163,8 +163,8 @@ const createGuestSession = asyncHandler(async (req, res) => {
   // Set guest cookie (HTTP-only, shorter TTL than auth cookie)
   res.cookie(GUEST_COOKIE, sessionId, {
     httpOnly: true,
-    secure  : process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    secure  : process.env.NODE_ENV === 'production' || process.env.COOKIE_SECURE === 'true',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
     maxAge  : GUEST_SESSION_MS,
   });
 
