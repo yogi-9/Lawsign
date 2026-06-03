@@ -88,7 +88,7 @@ function buildSigGallery() {
   return allSignatures.map(sig => {
     const isActive = activeSignature && activeSignature.id === sig.id;
     return `<div class="sig-gallery-card ${isActive ? 'active' : ''}" data-sig-id="${sig.id}" draggable="true">
-      <img src="${toFullImageUrl(sig.imageUrl)}" crossorigin="use-credentials" alt="${sig.originalName || 'Signature'}">
+      <img src="${toFullImageUrl(sig.imageUrl)}" alt="${sig.originalName || 'Signature'}">
       <div class="sig-gallery-card-label">${sig.originalName ? sig.originalName.replace(/\.[^/.]+$/, '').slice(0, 12) : 'Signature'}</div>
     </div>`;
   }).join('');

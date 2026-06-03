@@ -5,7 +5,8 @@ const sharp = require('sharp');
 const { sendError } = require('../utils/response');
 
 const validateImageIntelligence = async (req, res, next) => {
-  if (!req.file) return next();
+  // AI validation disabled for performance — re-enable when on a paid tier
+  return next();
 
   // Only validate image formats.
   if (!req.file.mimetype.startsWith('image/')) {
