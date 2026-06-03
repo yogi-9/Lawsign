@@ -1,4 +1,4 @@
-FROM node:20-bullseye
+FROM node:20-bookworm
 
 # Install Python and dependencies required for canvas/tesseract if any
 RUN apt-get update && apt-get install -y \
@@ -14,6 +14,10 @@ RUN apt-get update && apt-get install -y \
     librsvg2-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Create a virtual environment and put it in the PATH
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
 # Set up working directory
 WORKDIR /app
 
@@ -25,8 +29,8 @@ RUN npm install
 
 # Copy Python requirements and install
 COPY python/requirements.txt ./python/
-RUN pip3 install --no-cache-dir -r python/requirements.txt
-RUN pip3 install --no-cache-dir -r python/requirements_ocr.txt || true
+RUN pip install --no-cache-dir -r python/requirements.txt
+RUN pip install --no-cache-dir -r python/requirements_ocr.txt || true
 
 # Copy all other backend files
 COPY . .
