@@ -56,7 +56,7 @@ const auditRoutes     = require('./routes/audit.routes');
 // ─────────────────────────────────────────────────────────────────────────────
 async function startServer() {
   // ── 2. Database ─────────────────────────────────────────────────────────────
-  await connectDB(); // calls process.exit(1) on failure
+  await connectDB();
 
   // ── 3. Upload directories ───────────────────────────────────────────────────
   initUploadDirs();
@@ -66,35 +66,53 @@ async function startServer() {
 
   // ── 5. Helmet — security HTTP headers ────────────────────────────────────────
   const isProd = process.env.NODE_ENV === 'production';
-  
+
   app.use(helmet({
+    // ✅ FIX 1: Allow cross-origin image loading (fixes signature images)
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    crossOriginEmbedderPolicy: false,
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "https://cdnjs.cloudflare.com"],
-        imgSrc: ["'self'", "data:", "blob:"],
-        styleSrc: ["'self'", "'unsafe-inline'"], // Allow inline styles for UI components
-        connectSrc: ["'self'", process.env.FRONTEND_URL || "http://localhost:5173", "ws://localhost:5000", "wss://localhost:5000"],
+        // ✅ FIX 2: Add unsafe-eval for PDF.js (fixes CSP eval error)
+        scriptSrc: ["'self'", "https://cdnjs.cloudflare.com", "'unsafe-eval'"],
+        // ✅ FIX 3: Allow cross-origin images (fixes signature image loading)
+        imgSrc: ["'self'", "data:", "blob:", "https:"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        connectSrc: [
+          "'self'",
+          process.env.FRONTEND_URL || "http://localhost:5173",
+          "ws://localhost:5000",
+          "wss://localhost:5000",
+          // ✅ FIX 4: Allow all wss/https for Railway websockets
+          "wss:",
+          "https:",
+        ],
+        // ✅ FIX 5: Allow PDF.js web worker from CDN
+        workerSrc: ["'self'", "blob:", "https://cdnjs.cloudflare.com"],
+        frameSrc: ["'none'"],
       },
     },
     hsts: isProd ? {
       maxAge: 31536000,
       includeSubDomains: true,
       preload: true
-    } : false, // Never set HSTS in dev
+    } : false,
     referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
     xFrameOptions: { action: 'sameorigin' },
   }));
 
   app.use((req, res, next) => {
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    // ✅ FIX 6: Set CORP header on every response
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     next();
   });
 
   // ── 6. CORS — allow frontend to talk to this API ─────────────────────────────
   app.use(cors({
     origin        : process.env.FRONTEND_URL || 'http://localhost:5173',
-    credentials   : true,    // required for cookies to be sent cross-origin
+    credentials   : true,
     methods       : ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   }));
@@ -127,14 +145,13 @@ async function startServer() {
     const dbState = getConnectionState();
     const memUsage = process.memoryUsage();
 
-    // Measure DB ping time
     let dbPingMs = null;
     try {
       const start = Date.now();
       await require('mongoose').connection.db.admin().ping();
       dbPingMs = Date.now() - start;
     } catch {
-      dbPingMs = -1; // indicates ping failed
+      dbPingMs = -1;
     }
 
     const isHealthy = dbState.readyState === 1;
@@ -153,8 +170,8 @@ async function startServer() {
         pingMs   : dbPingMs,
       },
       memory: {
-        rss     : `${(memUsage.rss / 1024 / 1024).toFixed(1)} MB`,
-        heapUsed: `${(memUsage.heapUsed / 1024 / 1024).toFixed(1)} MB`,
+        rss      : `${(memUsage.rss / 1024 / 1024).toFixed(1)} MB`,
+        heapUsed : `${(memUsage.heapUsed / 1024 / 1024).toFixed(1)} MB`,
         heapTotal: `${(memUsage.heapTotal / 1024 / 1024).toFixed(1)} MB`,
       },
     });
@@ -170,7 +187,6 @@ async function startServer() {
   app.use(errorHandler);
 
   // ── 14. Raw HTTP server ───────────────────────────────────────────────────────
-  // Socket.io needs the raw Node http.Server, not the Express app wrapper
   const server = http.createServer(app);
 
   // ── 15. Socket.io ─────────────────────────────────────────────────────────────
@@ -179,7 +195,6 @@ async function startServer() {
       origin     : process.env.FRONTEND_URL || 'http://localhost:5173',
       credentials: true,
     },
-    // Send ping every 25s, disconnect after 60s no response
     pingInterval: 25000,
     pingTimeout : 60000,
   });
@@ -189,7 +204,6 @@ async function startServer() {
     try {
       const cookieHeader = socket.handshake.headers?.cookie || '';
 
-      // Try to extract JWT token from cookie
       const tokenCookie = cookieHeader
         .split(';')
         .map(c => c.trim())
@@ -199,14 +213,12 @@ async function startServer() {
         (tokenCookie ? tokenCookie.split('=').slice(1).join('=') : null);
 
       if (token) {
-        // Authenticated user — verify JWT and join userId room
         const decoded = verifyToken(token);
         socket.userId = decoded.userId;
         socket.guestSessionId = null;
         return next();
       }
 
-      // No JWT — check for guest cookie
       const guestCookie = cookieHeader
         .split(';')
         .map(c => c.trim())
@@ -219,7 +231,6 @@ async function startServer() {
         return next();
       }
 
-      // No credentials at all — reject
       return next(new Error('Socket: authentication required'));
 
     } catch {
@@ -243,7 +254,7 @@ async function startServer() {
   });
 
   // ── 17. Register io singleton ────────────────────────────────────────────────
-  setIO(io); // makes getIO() available to output.controller
+  setIO(io);
 
   // ── 18. Start listening ───────────────────────────────────────────────────────
   const PORT = parseInt(process.env.PORT, 10) || 5000;

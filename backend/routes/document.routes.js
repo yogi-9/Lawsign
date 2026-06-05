@@ -42,8 +42,15 @@ router.get('/:id', optionalAuth, validateObjectId('id'), getDocument);
 router.put('/:id/placements', optionalAuth, validateObjectId('id'), validatePlacements, savePlacements);
 
 // GET /api/v1/documents/:id/page/:page  — serve document page as image for editor canvas
-router.get('/:id/page/:page', optionalAuth, validateObjectId('id'), getPageImage);
-
+router.get('/:id/page/:page', 
+  (req, res, next) => {
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    next();
+  },
+  optionalAuth, 
+  validateObjectId('id'), 
+  getPageImage
+);
 // DELETE /api/v1/documents/:id
 router.delete('/:id', protect, validateObjectId('id'), deleteDocument);
 

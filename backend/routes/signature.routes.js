@@ -31,8 +31,15 @@ router.post(
 router.get('/', protect, listSignatures);
 
 // GET /api/v1/signatures/:id/image  — serve the processed PNG (requires signed URL token)
-router.get('/:id/image', validateSignatureToken, getSignatureImage);
-
+// GET /api/v1/signatures/:id/image
+router.get('/:id/image', 
+  (req, res, next) => {
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    next();
+  },
+  validateSignatureToken, 
+  getSignatureImage
+);
 // DELETE /api/v1/signatures/:id
 router.delete('/:id', protect, deleteSignature);
 
