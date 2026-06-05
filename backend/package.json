@@ -16,7 +16,7 @@
     "python:bg": "cd python && python bg_remover.py",
     "python:ocr": "cd python && python ocr_service.py",
     "dev:full": "concurrently \"npm run dev\" \"npm run python:bg\"",
-    "start:full": "concurrently \"npm start\" \"npm run python:bg\""
+    "start:full": "node server.js"
   },
   "keywords": [
     "lawsign",

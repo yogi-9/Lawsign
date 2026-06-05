@@ -13,7 +13,6 @@ RUN apt-get update && apt-get install -y \
     librsvg2-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Create virtual environment
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
@@ -22,14 +21,15 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install
 
-# Copy BOTH python requirement files before installing
 COPY python/requirements.txt ./python/requirements.txt
 COPY python/requirements_ocr.txt ./python/requirements_ocr.txt
 
 RUN pip install --no-cache-dir -r python/requirements.txt
 RUN pip install --no-cache-dir -r python/requirements_ocr.txt
 
-# Copy everything else
+# Pre-download rembg model at build time (prevents 30s timeout on first request)
+RUN python3 -c "from rembg import new_session; new_session('u2net')" || true
+
 COPY . .
 
 COPY start.sh .
