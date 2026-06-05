@@ -1,6 +1,5 @@
 FROM node:20-bookworm
 
-# Install Python and dependencies required for canvas/tesseract if any
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
@@ -14,32 +13,28 @@ RUN apt-get update && apt-get install -y \
     librsvg2-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Create a virtual environment and put it in the PATH
+# Create virtual environment
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Set up working directory
 WORKDIR /app
 
-# Copy package files
 COPY package*.json ./
-
-# Install Node dependencies
 RUN npm install
 
-# Copy Python requirements and install
-COPY python/requirements.txt ./python/
-RUN pip install --no-cache-dir -r python/requirements.txt
-RUN pip install --no-cache-dir -r python/requirements_ocr.txt || true
+# Copy BOTH python requirement files before installing
+COPY python/requirements.txt ./python/requirements.txt
+COPY python/requirements_ocr.txt ./python/requirements_ocr.txt
 
-# Copy all other backend files
+RUN pip install --no-cache-dir -r python/requirements.txt
+RUN pip install --no-cache-dir -r python/requirements_ocr.txt
+
+# Copy everything else
 COPY . .
 
-# Expose the API port
-EXPOSE 5000
-
-# Start the application (you may need to run python:bg and start separately as per your package.json, 
-# or use dev:full. For production, usually a process manager like pm2 or concurrently is used).
 COPY start.sh .
 RUN chmod +x start.sh
+
+EXPOSE 5000
+
 CMD ["./start.sh"]
